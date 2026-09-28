@@ -1,0 +1,40 @@
+.DS_Store
+.build/
+.swiftpm/
+DerivedData/
+*.xcodeproj
+*.xcworkspace
+*.xcuserstate
+*.xcuserdata
+
+# Local model downloads
+Models/*
+!Models/.gitkeep
+
+# Local audio and outputs
+*.wav
+*.mp3
+*.m4a
+*.flac
+*.aac
+*.caf
+*.txt
+*.log
+
+# Large/generated artifacts
+*.safetensors
+*.bin
+*.npy
+*.pt
+*.onnx
+*.mlpackage
+*.mlmodelc
+
+# Python/dev leftovers
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.xcode-derived/
