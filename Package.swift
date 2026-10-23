@@ -34,7 +34,8 @@ let package = Package(
         ),
         .executableTarget(
             name: "Srez",
-            dependencies: ["GigaAMKit"]
+            dependencies: ["GigaAMKit"],
+            resources: [.process("Resources")]
         ),
         .testTarget(
             name: "SrezTests",

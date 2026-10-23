@@ -5,25 +5,19 @@ struct MeetingSettings: Sendable {
     static let reasoningLevels = ["low", "medium", "high"]
 
     let outputDirectory: URL
-    let modelDirectory: URL
     let ffmpeg: URL
     let codex: URL
     let codexModel: String
     let codexReasoning: String
-    let saveRaw: Bool
 
     static func registerDefaults() {
-        let bundled = Bundle.main.url(forResource: "Defaults", withExtension: "plist")
-            .flatMap { NSDictionary(contentsOf: $0) as? [String: String] }
         UserDefaults.standard.register(defaults: [
             "outputDirectory": FileManager.default.homeDirectoryForCurrentUser
                 .appendingPathComponent("Documents/Встречи").path,
-            "modelDirectory": bundled?["modelDirectory"] ?? "",
             "ffmpegPath": executablePath("ffmpeg"),
             "codexPath": executablePath("codex"),
             "codexModel": "gpt-6-sol",
-            "codexReasoning": "medium",
-            "saveRaw": true
+            "codexReasoning": "medium"
         ])
         if !codexModels.contains(UserDefaults.standard.string(forKey: "codexModel") ?? "") {
             UserDefaults.standard.set("gpt-6-sol", forKey: "codexModel")
@@ -33,12 +27,12 @@ struct MeetingSettings: Sendable {
         }
     }
 
-    static func current() throws -> Self {
+    static func current(summarizing: Bool = false) throws -> Self {
         let defaults = UserDefaults.standard
-        for key in ["outputDirectory", "modelDirectory", "ffmpegPath", "codexPath"] {
+        for key in ["outputDirectory", summarizing ? "codexPath" : "ffmpegPath"] {
             guard let path = defaults.string(forKey: key),
                   !path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                throw MeetingError(message: "Заполните пути к папке результатов, модели, ffmpeg и Codex в настройках.")
+                throw MeetingError(message: "Заполните пути к папке результатов и \(summarizing ? "Codex" : "ffmpeg") в настройках.")
             }
         }
         func url(_ key: String) -> URL {
@@ -46,12 +40,11 @@ struct MeetingSettings: Sendable {
                 .trimmingCharacters(in: .whitespacesAndNewlines).expandingTilde)
         }
         return Self(
-            outputDirectory: url("outputDirectory"), modelDirectory: url("modelDirectory"),
+            outputDirectory: url("outputDirectory"),
             ffmpeg: url("ffmpegPath"), codex: url("codexPath"),
             codexModel: (defaults.string(forKey: "codexModel") ?? "")
                 .trimmingCharacters(in: .whitespacesAndNewlines),
-            codexReasoning: defaults.string(forKey: "codexReasoning") ?? "medium",
-            saveRaw: defaults.bool(forKey: "saveRaw")
+            codexReasoning: defaults.string(forKey: "codexReasoning") ?? "medium"
         )
     }
 

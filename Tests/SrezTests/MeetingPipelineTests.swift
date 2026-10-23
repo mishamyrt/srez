@@ -2,21 +2,44 @@ import XCTest
 @testable import Srez
 
 final class MeetingPipelineTests: XCTestCase {
-    func testNamesPairsAndRawToggle() throws {
+    func testSummaryNamesAndTranscriptPreservation() throws {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
+        let transcript = directory.appendingPathComponent("recording.raw.txt")
+        try "исходный текст".write(to: transcript, atomically: true, encoding: .utf8)
         let summary = MeetingSummary(title: "../План: релиз/осень", markdown: "# План\nГотовим релиз.")
-        let first = try MeetingPipeline.save(summary, transcript: "исходный текст", directory: directory, saveRaw: true)
-        XCTAssertEqual(first.markdown.lastPathComponent, "План релиз осень.md")
-        XCTAssertEqual(first.raw?.lastPathComponent, "План релиз осень.raw.txt")
-        XCTAssertEqual(try String(contentsOf: XCTUnwrap(first.raw)), "исходный текст")
-        let second = try MeetingPipeline.save(summary, transcript: "другой текст", directory: directory, saveRaw: false)
-        XCTAssertEqual(second.markdown.lastPathComponent, "План релиз осень (2).md")
-        XCTAssertNil(second.raw)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("План релиз осень (2).raw.txt").path))
-        XCTAssertEqual(try String(contentsOf: XCTUnwrap(first.raw)), "исходный текст")
+        let first = try MeetingPipeline.save(summary, transcript: transcript, directory: directory)
+        XCTAssertEqual(first.summary?.lastPathComponent, "План релиз осень.md")
+        XCTAssertEqual(first.transcript, transcript)
+        XCTAssertEqual(first.file, first.summary)
+        let second = try MeetingPipeline.save(summary, transcript: transcript, directory: directory)
+        XCTAssertEqual(second.summary?.lastPathComponent, "План релиз осень (2).md")
+        XCTAssertEqual(try String(contentsOf: first.transcript), "исходный текст")
+        XCTAssertEqual(try String(contentsOf: XCTUnwrap(first.summary)), summary.markdown + "\n")
         XCTAssertEqual(MeetingPipeline.fileStem("../\n:/"), "Встреча")
         XCTAssertLessThanOrEqual(MeetingPipeline.fileStem(String(repeating: "🧑🏽‍💻", count: 100)).utf8.count, 180)
+    }
+
+    func testTranscriptionSavesWithoutCodexAndDoesNotOverwrite() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let settings = MeetingSettings(
+            outputDirectory: directory, ffmpeg: directory.appendingPathComponent("missing-ffmpeg"),
+            codex: directory.appendingPathComponent("missing-codex"), codexModel: "", codexReasoning: "medium"
+        )
+        for (index, text) in ["исходный текст", "вторая запись"].enumerated() {
+            let output = try await MeetingPipeline.run(
+                input: directory.appendingPathComponent("Запись.mp3"), settings: settings, transcript: text
+            ) { event in
+                if case .stage(let stage) = event { XCTAssertFalse(stage.contains("Суммаризация")) }
+            }
+            XCTAssertNil(output.summary)
+            XCTAssertEqual(output.file, output.transcript)
+            XCTAssertEqual(output.transcript.lastPathComponent, index == 0 ? "Запись.raw.txt" : "Запись (2).raw.txt")
+            XCTAssertEqual(try String(contentsOf: output.transcript), text)
+        }
+        XCTAssertEqual(try String(contentsOf: directory.appendingPathComponent("Запись.raw.txt")), "исходный текст")
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path).count, 2)
     }
 
     func testLongTranscriptSplitsWithoutLosingText() {
@@ -29,7 +52,7 @@ final class MeetingPipelineTests: XCTestCase {
         XCTAssertEqual(MeetingPipeline.splitTranscript(" я ", limit: 1).joined(), " я ")
     }
 
-    func testRetrySummarizesCachedTranscriptAndPassesModel() async throws {
+    func testSummarizesSavedTranscriptAndPassesModel() async throws {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let cli = directory.appendingPathComponent("fake-codex")
@@ -54,17 +77,20 @@ final class MeetingPipelineTests: XCTestCase {
         try script.write(to: cli, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: cli.path)
         let settings = MeetingSettings(
-            outputDirectory: directory, modelDirectory: directory,
+            outputDirectory: directory,
             ffmpeg: directory.appendingPathComponent("missing-ffmpeg"), codex: cli,
-            codexModel: "test-model", codexReasoning: "high", saveRaw: true
+            codexModel: "test-model", codexReasoning: "high"
         )
         let transcript = String(repeating: "Обсудили выпуск. ", count: 2_000)
-        let output = try await MeetingPipeline.run(
+        let transcription = try await MeetingPipeline.run(
             input: directory.appendingPathComponent("missing-audio.wav"),
             settings: settings, transcript: transcript, update: { _ in }
         )
-        XCTAssertEqual(try String(contentsOf: XCTUnwrap(output.raw)), transcript)
-        XCTAssertTrue(try String(contentsOf: output.markdown).contains("Обсудили выпуск"))
+        XCTAssertNil(transcription.summary)
+        let output = try await MeetingPipeline.summarize(transcription, settings: settings, update: { _ in })
+        XCTAssertEqual(output.transcript, transcription.transcript)
+        XCTAssertEqual(try String(contentsOf: output.transcript), transcript)
+        XCTAssertTrue(try String(contentsOf: XCTUnwrap(output.summary)).contains("Обсудили выпуск"))
     }
 
     func testProcessFailureAndCancellation() async throws {

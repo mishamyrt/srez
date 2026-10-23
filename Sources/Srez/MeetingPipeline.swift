@@ -8,8 +8,9 @@ struct MeetingSummary: Codable, Sendable {
 }
 
 struct MeetingOutput: Sendable {
-    let markdown: URL
-    let raw: URL?
+    let transcript: URL
+    var summary: URL?
+    var file: URL { summary ?? transcript }
 }
 
 enum MeetingEvent: Sendable {
@@ -29,13 +30,7 @@ enum MeetingPipeline {
         update: @escaping @Sendable (MeetingEvent) async -> Void
     ) async throws -> MeetingOutput {
         let fm = FileManager.default
-        guard fm.isExecutableFile(atPath: settings.codex.path) else {
-            throw MeetingError(message: "Не найден Codex CLI. Укажите путь к codex в настройках.")
-        }
-        try fm.createDirectory(at: settings.outputDirectory, withIntermediateDirectories: true)
-        guard fm.isWritableFile(atPath: settings.outputDirectory.path) else {
-            throw MeetingError(message: "Нет доступа на запись в папку результатов.")
-        }
+        try prepareOutputDirectory(settings.outputDirectory)
         let work = fm.temporaryDirectory.appendingPathComponent("GigaAM-\(UUID().uuidString)")
         try fm.createDirectory(at: work, withIntermediateDirectories: true,
                                attributes: [.posixPermissions: 0o700])
@@ -48,17 +43,15 @@ enum MeetingPipeline {
             guard fm.isExecutableFile(atPath: settings.ffmpeg.path) else {
                 throw MeetingError(message: "Не найден ffmpeg. Укажите путь к ffmpeg в настройках.")
             }
-            guard fm.fileExists(atPath: settings.modelDirectory.appendingPathComponent("manifest.json").path) else {
-                throw MeetingError(message: "Выберите папку модели GigaAM с файлом manifest.json в настройках.")
-            }
-            await update(.stage("Преобразование в WAV"))
+            await update(.stage("Преобразование в WAV…"))
             let wav = work.appendingPathComponent("audio.wav")
             try await runProcess(settings.ffmpeg, arguments: [
                 "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", input.path,
                 "-map", "0:a:0", "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", wav.path
             ], directory: work)
-            await update(.stage("Загрузка модели"))
-            text = try await recognize(wav, model: settings.modelDirectory, update: update)
+            let model = try await ModelStore.prepare(update: update)
+            await update(.stage("Загрузка модели…"))
+            text = try await recognize(wav, model: model, update: update)
             guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 throw MeetingError(message: "Речь не распознана. Проверьте, что в файле есть русская речь.")
             }
@@ -66,23 +59,44 @@ enum MeetingPipeline {
         }
 
         try Task.checkCancellation()
+        await update(.stage("Сохранение расшифровки…"))
+        let file = try saveFile(text, title: input.deletingPathExtension().lastPathComponent,
+                                extension: "raw.txt", directory: settings.outputDirectory)
+        return MeetingOutput(transcript: file)
+    }
+
+    static func summarize(
+        _ output: MeetingOutput, settings: MeetingSettings,
+        update: @escaping @Sendable (MeetingEvent) async -> Void
+    ) async throws -> MeetingOutput {
+        let fm = FileManager.default
+        guard fm.isExecutableFile(atPath: settings.codex.path) else {
+            throw MeetingError(message: "Не найден Codex CLI. Укажите путь к codex в настройках.")
+        }
+        try prepareOutputDirectory(settings.outputDirectory)
+        let work = fm.temporaryDirectory.appendingPathComponent("GigaAM-\(UUID().uuidString)")
+        try fm.createDirectory(at: work, withIntermediateDirectories: true,
+                               attributes: [.posixPermissions: 0o700])
+        defer { try? fm.removeItem(at: work) }
+        try Task.checkCancellation()
+        let text = try String(contentsOf: output.transcript, encoding: .utf8)
         let parts = splitTranscript(text)
         var summaries: [String] = []
         if parts.count > 1 {
             for (index, part) in parts.enumerated() {
-                await update(.stage("Суммаризация: часть \(index + 1) из \(parts.count)"))
+                await update(.stage("Суммаризация: часть \(index + 1) из \(parts.count)…"))
                 let summary = try await summarize(part, settings: settings, directory: work, partial: true)
                 summaries.append("Часть \(index + 1)\n\(summary.markdown)")
             }
         }
-        await update(.stage("Суммаризация встречи"))
+        await update(.stage("Суммаризация…"))
         let summary = try await summarize(
             summaries.isEmpty ? text : summaries.joined(separator: "\n\n"),
             settings: settings, directory: work
         )
         try Task.checkCancellation()
-        await update(.stage("Сохранение"))
-        return try save(summary, transcript: text, directory: settings.outputDirectory, saveRaw: settings.saveRaw)
+        await update(.stage("Сохранение…"))
+        return try save(summary, transcript: output.transcript, directory: settings.outputDirectory)
     }
 
     private static func recognize(
@@ -90,7 +104,7 @@ enum MeetingPipeline {
     ) async throws -> String {
         try Task.checkCancellation()
         let recognizer = try GigaAMRecognizer(configuration: .init(modelDirectory: model))
-        await update(.stage("Распознавание речи"))
+        await update(.stage("Распознавание речи…"))
         return try await recognizer.transcribe(url: wav) { value in
             await update(.progress(value))
         }.text
@@ -174,28 +188,34 @@ enum MeetingPipeline {
     }
 
     static func save(
-        _ summary: MeetingSummary, transcript: String, directory: URL, saveRaw: Bool
+        _ summary: MeetingSummary, transcript: URL, directory: URL
     ) throws -> MeetingOutput {
+        let file = try saveFile(summary.markdown + "\n", title: summary.title, extension: "md", directory: directory)
+        return MeetingOutput(transcript: transcript, summary: file)
+    }
+
+    private static func prepareOutputDirectory(_ directory: URL) throws {
         let fm = FileManager.default
-        let stem = fileStem(summary.title)
+        try fm.createDirectory(at: directory, withIntermediateDirectories: true)
+        guard fm.isWritableFile(atPath: directory.path) else {
+            throw MeetingError(message: "Нет доступа на запись в папку результатов.")
+        }
+    }
+
+    private static func saveFile(_ text: String, title: String, extension suffix: String, directory: URL) throws -> URL {
+        let fm = FileManager.default
+        let stem = fileStem(title)
         var index = 1
         while true {
             let name = stem + (index == 1 ? "" : " (\(index))")
-            let md = directory.appendingPathComponent(name + ".md")
-            let raw = directory.appendingPathComponent(name + ".raw.txt")
-            if fm.fileExists(atPath: md.path) || fm.fileExists(atPath: raw.path) {
+            let file = directory.appendingPathComponent(name + "." + suffix)
+            if fm.fileExists(atPath: file.path) {
                 index += 1
                 continue
             }
             // Exclusive creation also prevents overwriting a file created after the check above.
-            try Data((summary.markdown + "\n").utf8).write(to: md, options: .withoutOverwriting)
-            do {
-                if saveRaw { try Data(transcript.utf8).write(to: raw, options: .withoutOverwriting) }
-            } catch {
-                try? fm.removeItem(at: md)
-                throw error
-            }
-            return MeetingOutput(markdown: md, raw: saveRaw ? raw : nil)
+            try Data(text.utf8).write(to: file, options: .withoutOverwriting)
+            return file
         }
     }
 

@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 @main
@@ -11,7 +12,9 @@ struct SrezApp: App {
         Window("Srez", id: "meetings") {
             MeetingsView(queue: delegate.queue)
         }
-        .defaultSize(width: 680, height: 480)
+        .defaultSize(width: 420, height: 550)
+        .windowStyle(.hiddenTitleBar)
+        .windowToolbarStyle(.unifiedCompact)
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("Открыть запись…") { delegate.queue.chooseFiles() }
@@ -26,9 +29,17 @@ struct SrezApp: App {
 final class MeetingsDelegate: NSObject, NSApplicationDelegate {
     let queue = MeetingQueue()
     private var mainWindow: NSWindow?
+    private var jobsObservation: AnyCancellable?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         mainWindow = NSApp.windows.first { $0.title == "Srez" }
+        jobsObservation = queue.$jobs.map(\.isEmpty).removeDuplicates().sink { [weak self] isEmpty in
+            if isEmpty {
+                self?.mainWindow?.orderOut(nil)
+            } else {
+                self?.mainWindow?.makeKeyAndOrderFront(nil)
+            }
+        }
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         // Finder's open event arrives during launch; let it suppress the initial picker.
@@ -45,6 +56,10 @@ final class MeetingsDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if queue.jobs.isEmpty {
+            queue.chooseFiles()
+            return false
+        }
         mainWindow?.makeKeyAndOrderFront(nil)
         return true
     }
@@ -73,122 +88,198 @@ final class MeetingsDelegate: NSObject, NSApplicationDelegate {
 
 struct MeetingsView: View {
     @ObservedObject var queue: MeetingQueue
+    @AppStorage("outputDirectory") private var outputDirectory = ""
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                Image(systemName: "waveform").font(.largeTitle).foregroundStyle(.tint)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Протоколы встреч").font(.title2.bold())
-                    Text("Запись → расшифровка → резюме").foregroundStyle(.secondary)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
+                    ForEach(queue.jobs) { job in
+                        jobView(job)
+                        Divider().padding(.leading, 46)
+                    }
                 }
-                Spacer()
-                SettingsLink { Image(systemName: "gearshape") }
-                    .help("Настройки")
-                Button("Открыть запись…") { queue.chooseFiles() }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(queue.pickerPresented)
-            }.padding(24)
-            Divider()
-            if queue.jobs.isEmpty {
-                ContentUnavailableView {
-                    Label("Выберите запись встречи", systemImage: "doc.badge.waveform")
-                } description: {
-                    Text("MP3, WAV, WebM или MP4\nМожно открыть несколько файлов: они попадут в очередь.")
-                }
-                .frame(maxHeight: .infinity)
-            } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 16) {
-                        ForEach(queue.jobs) { job in
-                            jobView(job)
-                            Divider()
-                        }
-                    }.padding(24)
-                }
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
             }
             Divider()
             HStack {
-                Text("Распознавание на Mac · Суммаризация через Codex")
-                    .font(.caption).foregroundStyle(.secondary)
+                Text((outputDirectory as NSString).abbreviatingWithTildeInPath)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(outputDirectory)
+                    .textSelection(.enabled)
                 Spacer()
-                if queue.jobs.contains(where: { $0.state == .done }) {
-                    Button("Убрать завершённые") { queue.clearFinished() }.font(.caption)
-                }
-            }.padding(12)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color(nsColor: .windowBackgroundColor))
         }
-        .frame(minWidth: 600, minHeight: 380)
+        .background(Color(nsColor: .textBackgroundColor))
+        .frame(minWidth: 360, minHeight: 320)
+        .toolbarBackground(.hidden, for: .windowToolbar)
+        .toolbar {
+            if #available(macOS 26, *) {
+                ToolbarSpacer(.flexible, placement: .primaryAction)
+                windowActions.sharedBackgroundVisibility(.hidden)
+            } else {
+                ToolbarItem(placement: .primaryAction) { Spacer() }
+                windowActions
+            }
+        }
+    }
+
+    private var windowActions: some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
+            HStack(spacing: 18) {
+                Button("Открыть запись…", systemImage: "folder") { queue.chooseFiles() }
+                    .disabled(queue.pickerPresented)
+                    .help("Открыть запись… (⌘O)")
+                SettingsLink {
+                    Label("Настройки", systemImage: "gearshape")
+                }
+                .help("Настройки")
+            }
+            .buttonStyle(.plain)
+            .labelStyle(.iconOnly)
+            .font(.system(size: 18))
+            .foregroundStyle(.secondary)
+        }
     }
 
     @ViewBuilder
     private func jobView(_ job: MeetingJob) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .top) {
-                Image(systemName: job.state == .done ? "checkmark.circle.fill" : "doc.badge.waveform")
-                    .foregroundStyle(job.state == .done ? Color.green : Color.secondary)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(job.output?.markdown.deletingPathExtension().lastPathComponent ?? job.input.lastPathComponent)
-                        .font(.headline).textSelection(.enabled)
-                    Text(job.stage).font(.subheadline).foregroundStyle(.secondary)
+        HStack(spacing: 12) {
+            Image(nsImage: NSWorkspace.shared.icon(forFile: job.input.path))
+                .resizable()
+                .frame(width: 34, height: 34)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(job.input.lastPathComponent)
+                    .font(.system(size: 13))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(job.input.lastPathComponent)
+                    .textSelection(.enabled)
+                if job.state == .running {
+                    ProgressView(value: job.progress)
+                        .progressViewStyle(.linear)
+                        .controlSize(.small)
+                        .accessibilityLabel("Прогресс обработки")
                 }
-                Spacer()
-                if job.state == .running || job.state == .waiting {
-                    Button("Отменить") { queue.cancel(job.id) }
-                        .disabled(job.stage == "Отмена…")
+                Text(job.state == .done ? (job.output?.summary?.deletingPathExtension().lastPathComponent ?? job.stage) : job.stage)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if let error = job.error {
+                    Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled)
+                }
+                if job.transcript != nil && (job.state == .failed || job.state == .cancelled) {
+                    Text("Расшифровка сохранена в памяти до закрытия приложения.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 8) {
+                if job.canSummarize {
+                    Button { queue.summarize(job.id) } label: {
+                        Label {
+                            Text("Summarize")
+                        } icon: {
+                            ZStack {
+                                Image(systemName: "circle.fill")
+                                Image("Summarize", bundle: .module)
+                                    .resizable()
+                                    .frame(width: 9, height: 9)
+                                    .foregroundStyle(Color(nsColor: .textBackgroundColor))
+                            }
+                        }
+                    }
+                    .help("Суммаризировать расшифровку")
+                }
+                if let output = job.output {
+                    Button("Показать в Finder", systemImage: "magnifyingglass.circle.fill") {
+                        NSWorkspace.shared.activateFileViewerSelecting([output.file])
+                    }
+                    .help("Показать в Finder")
                 }
                 if job.state == .failed || job.state == .cancelled {
-                    Button(job.transcript == nil ? "Повторить" : "Повторить суммаризацию") { queue.retry(job.id) }
+                    Button(job.retryTitle, systemImage: "arrow.clockwise.circle.fill") { queue.retry(job.id) }
+                        .help(job.retryTitle)
                 }
+                Button("Убрать из списка", systemImage: "xmark.circle.fill") { queue.remove(job.id) }
+                    .help(job.state == .running || job.state == .waiting ? "Отменить и убрать из списка" : "Убрать из списка")
             }
-            if job.state == .running {
-                if let progress = job.progress {
-                    HStack {
-                        ProgressView(value: progress)
-                        Text(progress, format: .percent.precision(.fractionLength(0)))
-                            .font(.caption.monospacedDigit()).frame(width: 40, alignment: .trailing)
-                    }
-                } else { ProgressView().controlSize(.small) }
-            }
-            if let error = job.error {
-                Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled)
-            }
-            if job.transcript != nil && (job.state == .failed || job.state == .cancelled) {
-                Text("Расшифровка сохранена в памяти до закрытия приложения.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
+            .buttonStyle(JobActionButtonStyle())
+            .labelStyle(.iconOnly)
+            .font(.system(size: 14))
+        }
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) {
+            if let output = job.output { NSWorkspace.shared.open(output.file) }
+        }
+        .contextMenu {
             if let output = job.output {
-                HStack {
-                    Button("Открыть Markdown") { NSWorkspace.shared.open(output.markdown) }
-                    Button("Показать в Finder") { NSWorkspace.shared.activateFileViewerSelecting([output.markdown]) }
-                    if let raw = output.raw {
-                        Button("Расшифровка") { NSWorkspace.shared.open(raw) }
-                    }
+                Button(output.summary == nil ? "Открыть расшифровку" : "Открыть резюме") { NSWorkspace.shared.open(output.file) }
+                Button("Показать в Finder") { NSWorkspace.shared.activateFileViewerSelecting([output.file]) }
+                if output.summary != nil {
+                    Button("Открыть расшифровку") { NSWorkspace.shared.open(output.transcript) }
                 }
             }
+            if job.canSummarize {
+                Button("Summarize") { queue.summarize(job.id) }
+            }
+            if job.state == .running || job.state == .waiting {
+                Button("Отменить") { queue.cancel(job.id) }
+                    .disabled(job.stage == "Отмена…")
+            }
+            if job.state == .failed || job.state == .cancelled {
+                Button(job.retryTitle) { queue.retry(job.id) }
+            }
+            Button("Убрать из списка") { queue.remove(job.id) }
+        }
+    }
+}
+
+private struct JobActionButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Content(configuration: configuration)
+    }
+
+    private struct Content: View {
+        let configuration: ButtonStyle.Configuration
+        @State private var isHovered = false
+
+        var body: some View {
+            configuration.label
+                .foregroundStyle(isHovered || configuration.isPressed ? .secondary : .tertiary)
+                .onHover { isHovered = $0 }
         }
     }
 }
 
 struct MeetingSettingsView: View {
     @AppStorage("outputDirectory") private var output = ""
-    @AppStorage("modelDirectory") private var model = ""
     @AppStorage("ffmpegPath") private var ffmpeg = ""
     @AppStorage("codexPath") private var codex = ""
     @AppStorage("codexModel") private var codexModel = "gpt-6-sol"
     @AppStorage("codexReasoning") private var codexReasoning = "medium"
-    @AppStorage("saveRaw") private var saveRaw = true
 
     var body: some View {
         Form {
             Section("Результаты") {
                 pathRow("Папка", value: $output, directory: true)
-                Toggle("Сохранять сырую расшифровку (.raw.txt)", isOn: $saveRaw)
-                Text("Резюме и расшифровка получают имя по теме встречи. Существующие файлы не перезаписываются.")
+                Text("Расшифровка сохраняется сразу, резюме создаётся по кнопке Summarize. Существующие файлы не перезаписываются.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Распознавание") {
-                pathRow("Модель GigaAM", value: $model, directory: true)
                 pathRow("ffmpeg", value: $ffmpeg, directory: false)
+                Text("Модель речи скачивается автоматически при первом распознавании (около 445 МБ).")
+                    .font(.caption).foregroundStyle(.secondary)
             }
             Section("Codex") {
                 pathRow("Codex CLI", value: $codex, directory: false)

@@ -12,6 +12,8 @@ struct MeetingJob: Identifiable {
     var transcript: String?
     var output: MeetingOutput?
     var error: String?
+    var canSummarize: Bool { state == .done && output != nil && output?.summary == nil }
+    var retryTitle: String { output == nil ? "Повторить" : "Повторить суммаризацию" }
 }
 
 @MainActor
@@ -21,7 +23,7 @@ final class MeetingQueue: ObservableObject {
     private var filePanel: NSOpenPanel?
     private var worker: Task<MeetingOutput, Error>?
     private var activeID: UUID?
-    var hasPendingJobs: Bool { jobs.contains { $0.state == .waiting || $0.state == .running } }
+    var hasPendingJobs: Bool { worker != nil || jobs.contains { $0.state == .waiting || $0.state == .running } }
 
     func chooseFiles() {
         guard !pickerPresented else { return }
@@ -77,20 +79,33 @@ final class MeetingQueue: ObservableObject {
         startNext()
     }
 
-    func clearFinished() {
-        jobs.removeAll { $0.state == .done || $0.state == .cancelled && $0.transcript == nil }
+    func summarize(_ id: UUID) {
+        guard let index = jobs.firstIndex(where: { $0.id == id }), jobs[index].canSummarize else { return }
+        jobs[index].state = .waiting
+        jobs[index].stage = "В очереди на суммаризацию"
+        startNext()
+    }
+
+    func remove(_ id: UUID) {
+        cancel(id)
+        jobs.removeAll { $0.id == id }
     }
 
     private func startNext() {
         guard worker == nil, let index = jobs.firstIndex(where: { $0.state == .waiting }) else { return }
         let job = jobs[index]
-        let settings = Result { try MeetingSettings.current() }
+        let settings = Result { try MeetingSettings.current(summarizing: job.output != nil) }
         jobs[index].state = .running
         activeID = job.id
         let task = Task.detached(priority: .userInitiated) { [self] in
-            try await MeetingPipeline.run(input: job.input, settings: settings.get(), transcript: job.transcript) { event in
+            let update: @Sendable (MeetingEvent) async -> Void = { event in
                 await self.receive(event, for: job.id)
             }
+            if let output = job.output {
+                return try await MeetingPipeline.summarize(output, settings: settings.get(), update: update)
+            }
+            return try await MeetingPipeline.run(input: job.input, settings: settings.get(),
+                                                 transcript: job.transcript, update: update)
         }
         worker = task
         Task {
@@ -100,7 +115,7 @@ final class MeetingQueue: ObservableObject {
                 switch result {
                 case .success(let output):
                     jobs[index].state = .done
-                    jobs[index].stage = "Готово"
+                    jobs[index].stage = output.summary == nil ? "Расшифровка готова" : "Готово"
                     jobs[index].output = output
                     jobs[index].transcript = nil
                 case .failure(let error):
