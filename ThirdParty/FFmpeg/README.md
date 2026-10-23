@@ -5,7 +5,7 @@ licensed under the GNU Lesser General Public License version 2.1 or later.
 Srez runs the `ffmpeg` command as a separate process; it does not link FFmpeg libraries.
 
 The bundled build is for Apple Silicon and macOS 14 or later. It converts local
-MP3, WAV, WebM and MP4 audio to mono 16 kHz PCM WAV. FFmpeg libraries are linked
+MP3, WAV, WebM, MP4 and M4A audio to mono 16 kHz PCM WAV. FFmpeg libraries are linked
 statically into the command; only macOS system libraries remain dynamic.
 GPL and nonfree components, external codec libraries and network protocols are disabled.
 The upstream source files are unmodified.

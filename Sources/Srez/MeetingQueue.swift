@@ -36,7 +36,7 @@ final class MeetingQueue: ObservableObject {
         panel.prompt = "Распознать"
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
-        panel.allowedContentTypes = ["mp3", "wav", "webm", "mp4"].compactMap { UTType(filenameExtension: $0) }
+        panel.allowedContentTypes = ["mp3", "wav", "webm", "mp4", "m4a"].compactMap { UTType(filenameExtension: $0) }
         panel.begin { [weak self] response in
             Task { @MainActor in
                 self?.pickerPresented = false
@@ -50,10 +50,10 @@ final class MeetingQueue: ObservableObject {
         if pickerPresented { filePanel?.cancel(nil) }
         for url in urls {
             var job = MeetingJob(input: url)
-            if !["mp3", "wav", "webm", "mp4"].contains(url.pathExtension.lowercased()) {
+            if !["mp3", "wav", "webm", "mp4", "m4a"].contains(url.pathExtension.lowercased()) {
                 job.state = .failed
                 job.stage = "Неподдерживаемый формат"
-                job.error = "Выберите MP3, WAV, WebM или MP4."
+                job.error = "Выберите MP3, WAV, WebM, MP4 или M4A."
             }
             jobs.append(job)
         }
