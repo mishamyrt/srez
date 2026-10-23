@@ -27,12 +27,14 @@ struct MeetingSettings: Sendable {
         }
     }
 
-    static func current(summarizing: Bool = false) throws -> Self {
+    static func current(summarizing: Bool = false, bundle: Bundle = .main) throws -> Self {
         let defaults = UserDefaults.standard
-        for key in ["outputDirectory", summarizing ? "codexPath" : "ffmpegPath"] {
+        for key in (summarizing ? ["outputDirectory", "codexPath"] : ["outputDirectory"]) {
             guard let path = defaults.string(forKey: key),
                   !path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                throw MeetingError(message: "Заполните пути к папке результатов и \(summarizing ? "Codex" : "ffmpeg") в настройках.")
+                throw MeetingError(message: key == "outputDirectory"
+                                   ? "Укажите папку результатов в настройках."
+                                   : "Укажите путь к Codex CLI в настройках.")
             }
         }
         func url(_ key: String) -> URL {
@@ -41,7 +43,10 @@ struct MeetingSettings: Sendable {
         }
         return Self(
             outputDirectory: url("outputDirectory"),
-            ffmpeg: url("ffmpegPath"), codex: url("codexPath"),
+            ffmpeg: bundle.bundleURL.pathExtension == "app"
+                ? bundle.bundleURL.appendingPathComponent("Contents/MacOS/ffmpeg")
+                : url("ffmpegPath"),
+            codex: url("codexPath"),
             codexModel: (defaults.string(forKey: "codexModel") ?? "")
                 .trimmingCharacters(in: .whitespacesAndNewlines),
             codexReasoning: defaults.string(forKey: "codexReasoning") ?? "medium"

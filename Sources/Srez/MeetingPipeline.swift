@@ -41,7 +41,7 @@ enum MeetingPipeline {
             text = transcript
         } else {
             guard fm.isExecutableFile(atPath: settings.ffmpeg.path) else {
-                throw MeetingError(message: "Не найден ffmpeg. Укажите путь к ffmpeg в настройках.")
+                throw MeetingError(message: "Не найден встроенный ffmpeg. Пересоберите или переустановите Srez.")
             }
             await update(.stage("Преобразование в WAV…"))
             let wav = work.appendingPathComponent("audio.wav")

@@ -305,7 +305,6 @@ private struct JobActionButtonStyle: ButtonStyle {
 
 struct MeetingSettingsView: View {
     @AppStorage("outputDirectory") private var output = ""
-    @AppStorage("ffmpegPath") private var ffmpeg = ""
     @AppStorage("codexPath") private var codex = ""
     @AppStorage("codexModel") private var codexModel = "gpt-6-sol"
     @AppStorage("codexReasoning") private var codexReasoning = "medium"
@@ -315,11 +314,6 @@ struct MeetingSettingsView: View {
             Section("Результаты") {
                 pathRow("Папка", value: $output, directory: true)
                 Text("Расшифровка сохраняется сразу, резюме создаётся по кнопке Summarize. Существующие файлы не перезаписываются.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Section("Распознавание") {
-                pathRow("ffmpeg", value: $ffmpeg, directory: false)
-                Text("Модель речи скачивается автоматически при первом распознавании (около 445 МБ).")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Codex") {
