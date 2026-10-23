@@ -3,6 +3,81 @@ import XCTest
 
 final class MeetingQueueTests: XCTestCase {
     @MainActor
+    func testSeparateQueuesRunInParallelAndCancelIndependently() async throws {
+        let fm = FileManager.default
+        let directory = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try fm.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: directory) }
+        for name in ["ffmpeg", "codex"] {
+            let executable = directory.appendingPathComponent("fake-\(name)")
+            try """
+            #!/bin/sh
+            /usr/bin/touch "$(dirname "$0")/\(name)-started"
+            exec /bin/sleep 30
+            """.write(to: executable, atomically: true, encoding: .utf8)
+            try fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        }
+        let defaults = UserDefaults.standard
+        let settings = [
+            "outputDirectory": directory.path,
+            "ffmpegPath": directory.appendingPathComponent("fake-ffmpeg").path,
+            "codexPath": directory.appendingPathComponent("fake-codex").path
+        ]
+        let previous = settings.keys.map { ($0, defaults.object(forKey: $0)) }
+        defer { for (key, value) in previous { defaults.set(value, forKey: key) } }
+        for (key, value) in settings { defaults.set(value, forKey: key) }
+
+        let transcript = directory.appendingPathComponent("meeting.raw.txt")
+        try "Обсудили выпуск.".write(to: transcript, atomically: true, encoding: .utf8)
+        var recording = MeetingJob(input: directory.appendingPathComponent("recording.mp3"))
+        recording.state = .failed
+        var nextRecording = MeetingJob(input: directory.appendingPathComponent("next.mp3"))
+        nextRecording.transcript = "Следующая запись."
+        var meeting = MeetingJob(input: directory.appendingPathComponent("meeting.mp3"))
+        meeting.state = .done
+        meeting.output = MeetingOutput(transcript: transcript)
+        var nextMeeting = MeetingJob(input: directory.appendingPathComponent("next-meeting.mp3"))
+        nextMeeting.state = .done
+        nextMeeting.output = meeting.output
+        let queue = MeetingQueue()
+        queue.jobs = [recording, nextRecording, meeting, nextMeeting]
+
+        queue.retry(recording.id)
+        queue.summarize(meeting.id)
+        queue.summarize(nextMeeting.id)
+        XCTAssertEqual(queue.jobs[0].state, .running)
+        XCTAssertEqual(queue.jobs[1].state, .waiting)
+        XCTAssertEqual(queue.jobs[2].state, .running)
+        XCTAssertEqual(queue.jobs[3].state, .waiting)
+        try await waitUntil {
+            fm.fileExists(atPath: directory.appendingPathComponent("ffmpeg-started").path)
+                && fm.fileExists(atPath: directory.appendingPathComponent("codex-started").path)
+        }
+
+        queue.cancel(recording.id)
+        try await waitUntil { queue.jobs[1].state == .done }
+        XCTAssertEqual(queue.jobs[0].state, .cancelled)
+        XCTAssertEqual(queue.jobs[2].state, .running)
+        XCTAssertEqual(queue.jobs[3].state, .waiting)
+        XCTAssertNil(queue.jobs[1].output?.summary)
+
+        queue.retry(recording.id)
+        XCTAssertEqual(queue.jobs[0].state, .running)
+        queue.remove(meeting.id)
+        try await waitUntil { queue.jobs.last?.state == .running }
+        XCTAssertEqual(queue.jobs[0].state, .running)
+        XCTAssertEqual(queue.jobs.last?.id, nextMeeting.id)
+
+        queue.remove(recording.id)
+        queue.remove(nextMeeting.id)
+        XCTAssertEqual(queue.jobs.map(\.id), [nextRecording.id])
+        XCTAssertTrue(queue.hasPendingJobs)
+        try await waitForQueue(queue)
+        XCTAssertFalse(queue.hasPendingJobs)
+        XCTAssertEqual(try String(contentsOf: transcript), "Обсудили выпуск.")
+    }
+
+    @MainActor
     func testRemovingJobsCancelsWorkBeforeAdvancingQueue() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -163,10 +238,15 @@ final class MeetingQueueTests: XCTestCase {
 
     @MainActor
     private func waitForQueue(_ queue: MeetingQueue) async throws {
+        try await waitUntil { !queue.hasPendingJobs }
+    }
+
+    @MainActor
+    private func waitUntil(_ condition: () -> Bool) async throws {
         for _ in 0..<200 {
-            if !queue.hasPendingJobs { return }
+            if condition() { return }
             try await Task.sleep(for: .milliseconds(20))
         }
-        XCTFail("Queue did not finish")
+        XCTFail("Queue did not reach the expected state")
     }
 }

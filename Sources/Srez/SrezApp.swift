@@ -133,7 +133,7 @@ struct MeetingsView: View {
 
     private var windowActions: some ToolbarContent {
         ToolbarItem(placement: .primaryAction) {
-            HStack(spacing: 18) {
+            HStack(spacing: 6) {
                 Button("Открыть запись…", systemImage: "folder") { queue.chooseFiles() }
                     .disabled(queue.pickerPresented)
                     .help("Открыть запись… (⌘O)")
@@ -142,9 +142,10 @@ struct MeetingsView: View {
                 }
                 .help("Настройки")
             }
-            .buttonStyle(.plain)
+            .padding(.trailing, 3)
+            .buttonStyle(ToolbarActionButtonStyle())
             .labelStyle(.iconOnly)
-            .font(.system(size: 18))
+            .font(.system(size: 16))
             .foregroundStyle(.secondary)
         }
     }
@@ -241,6 +242,31 @@ struct MeetingsView: View {
                 Button(job.retryTitle) { queue.retry(job.id) }
             }
             Button("Убрать из списка") { queue.remove(job.id) }
+        }
+    }
+}
+
+private struct ToolbarActionButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Content(configuration: configuration)
+    }
+
+    private struct Content: View {
+        let configuration: ButtonStyle.Configuration
+        @Environment(\.isEnabled) private var isEnabled
+        @State private var isHovered = false
+
+        var body: some View {
+            configuration.label
+                .frame(width: 20, height: 16)
+                .padding(6)
+                .background {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.primary.opacity(isEnabled && (isHovered || configuration.isPressed) ? 0.1 : 0))
+                }
+                .contentShape(RoundedRectangle(cornerRadius: 6))
+                .opacity(isEnabled ? 1 : 0.5)
+                .onHover { isHovered = $0 }
         }
     }
 }

@@ -21,9 +21,11 @@ final class MeetingQueue: ObservableObject {
     @Published var jobs: [MeetingJob] = []
     @Published var pickerPresented = false
     private var filePanel: NSOpenPanel?
-    private var worker: Task<MeetingOutput, Error>?
-    private var activeID: UUID?
-    var hasPendingJobs: Bool { worker != nil || jobs.contains { $0.state == .waiting || $0.state == .running } }
+    private var transcriptionWorker: (id: UUID, task: Task<MeetingOutput, Error>)?
+    private var summaryWorker: (id: UUID, task: Task<MeetingOutput, Error>)?
+    var hasPendingJobs: Bool {
+        transcriptionWorker != nil || summaryWorker != nil || jobs.contains { $0.state == .waiting || $0.state == .running }
+    }
 
     func chooseFiles() {
         guard !pickerPresented else { return }
@@ -60,9 +62,10 @@ final class MeetingQueue: ObservableObject {
 
     func cancel(_ id: UUID) {
         guard let index = jobs.firstIndex(where: { $0.id == id }) else { return }
-        if id == activeID {
+        let worker = jobs[index].output == nil ? transcriptionWorker : summaryWorker
+        if worker?.id == id {
             jobs[index].stage = "Отмена…"
-            worker?.cancel()
+            worker?.task.cancel()
         } else if jobs[index].state == .waiting {
             jobs[index].state = .cancelled
             jobs[index].stage = "Отменено"
@@ -73,7 +76,7 @@ final class MeetingQueue: ObservableObject {
         guard let index = jobs.firstIndex(where: { $0.id == id }),
               jobs[index].state == .failed || jobs[index].state == .cancelled else { return }
         jobs[index].state = .waiting
-        jobs[index].stage = "В очереди"
+        jobs[index].stage = jobs[index].output == nil ? "В очереди" : "В очереди на суммаризацию"
         jobs[index].error = nil
         jobs[index].progress = nil
         startNext()
@@ -92,11 +95,18 @@ final class MeetingQueue: ObservableObject {
     }
 
     private func startNext() {
-        guard worker == nil, let index = jobs.firstIndex(where: { $0.state == .waiting }) else { return }
+        startNext(summarizing: false)
+        startNext(summarizing: true)
+    }
+
+    private func startNext(summarizing: Bool) {
+        let worker = summarizing ? summaryWorker : transcriptionWorker
+        guard worker == nil, let index = jobs.firstIndex(where: {
+            $0.state == .waiting && ($0.output != nil) == summarizing
+        }) else { return }
         let job = jobs[index]
-        let settings = Result { try MeetingSettings.current(summarizing: job.output != nil) }
+        let settings = Result { try MeetingSettings.current(summarizing: summarizing) }
         jobs[index].state = .running
-        activeID = job.id
         let task = Task.detached(priority: .userInitiated) { [self] in
             let update: @Sendable (MeetingEvent) async -> Void = { event in
                 await self.receive(event, for: job.id)
@@ -107,7 +117,11 @@ final class MeetingQueue: ObservableObject {
             return try await MeetingPipeline.run(input: job.input, settings: settings.get(),
                                                  transcript: job.transcript, update: update)
         }
-        worker = task
+        if summarizing {
+            summaryWorker = (job.id, task)
+        } else {
+            transcriptionWorker = (job.id, task)
+        }
         Task {
             let result = await task.result
             if let index = jobs.firstIndex(where: { $0.id == job.id }) {
@@ -124,9 +138,12 @@ final class MeetingQueue: ObservableObject {
                     jobs[index].error = error is CancellationError ? nil : error.localizedDescription
                 }
             }
-            worker = nil
-            activeID = nil
-            startNext()
+            if summarizing {
+                summaryWorker = nil
+            } else {
+                transcriptionWorker = nil
+            }
+            startNext(summarizing: summarizing)
         }
     }
 
