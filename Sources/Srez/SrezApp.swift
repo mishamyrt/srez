@@ -98,7 +98,7 @@ struct MeetingsView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(queue.jobs) { job in
-                        jobView(job)
+                        MeetingJobView(job: job, queue: queue, codexAvailable: codexAvailable)
                         Divider().padding(.leading, 46)
                     }
                 }
@@ -173,8 +173,15 @@ struct MeetingsView: View {
         }
     }
 
-    @ViewBuilder
-    private func jobView(_ job: MeetingJob) -> some View {
+}
+
+private struct MeetingJobView: View {
+    let job: MeetingJob
+    @ObservedObject var queue: MeetingQueue
+    let codexAvailable: Bool
+    @State private var hoveredHint: String?
+
+    var body: some View {
         HStack(spacing: 12) {
             Image(nsImage: NSWorkspace.shared.icon(forFile: job.input.path))
                 .resizable()
@@ -193,7 +200,7 @@ struct MeetingsView: View {
                         .controlSize(.small)
                         .accessibilityLabel("Прогресс обработки")
                 }
-                Text(job.state == .done ? (job.output?.summary?.deletingPathExtension().lastPathComponent ?? job.stage) : job.stage)
+                Text(hoveredHint ?? (job.state == .done ? (job.output?.summary?.deletingPathExtension().lastPathComponent ?? job.stage) : job.stage))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -222,22 +229,24 @@ struct MeetingsView: View {
                             }
                         }
                     }
-                    .help("Суммаризировать расшифровку")
+                    .buttonStyle(JobActionButtonStyle(hint: "Суммаризировать", hoveredHint: $hoveredHint))
                 }
                 if let output = job.output {
                     Button("Показать в Finder", systemImage: "magnifyingglass.circle.fill") {
                         NSWorkspace.shared.activateFileViewerSelecting([output.file])
                     }
-                    .help("Показать в Finder")
+                    .buttonStyle(JobActionButtonStyle(hint: "Показать в Finder", hoveredHint: $hoveredHint))
                 }
                 if (job.state == .failed || job.state == .cancelled) && (job.output == nil || codexAvailable) {
                     Button(job.retryTitle, systemImage: "arrow.clockwise.circle.fill") { queue.retry(job.id) }
-                        .help(job.retryTitle)
+                        .buttonStyle(JobActionButtonStyle(hint: job.retryTitle, hoveredHint: $hoveredHint))
                 }
                 Button("Убрать из списка", systemImage: "xmark.circle.fill") { queue.remove(job.id) }
-                    .help(job.state == .running || job.state == .waiting ? "Отменить и убрать из списка" : "Убрать из списка")
+                    .buttonStyle(JobActionButtonStyle(
+                        hint: job.state == .running || job.state == .waiting ? "Отменить и убрать из списка" : "Убрать из списка",
+                        hoveredHint: $hoveredHint
+                    ))
             }
-            .buttonStyle(JobActionButtonStyle())
             .labelStyle(.iconOnly)
             .font(.system(size: 14))
         }
@@ -295,18 +304,36 @@ private struct ToolbarActionButtonStyle: ButtonStyle {
 }
 
 private struct JobActionButtonStyle: ButtonStyle {
+    let hint: String
+    @Binding var hoveredHint: String?
+
     func makeBody(configuration: Configuration) -> some View {
-        Content(configuration: configuration)
+        Content(configuration: configuration, hint: hint, hoveredHint: $hoveredHint)
     }
 
     private struct Content: View {
         let configuration: ButtonStyle.Configuration
+        let hint: String
+        @Binding var hoveredHint: String?
         @State private var isHovered = false
 
         var body: some View {
             configuration.label
                 .foregroundStyle(isHovered || configuration.isPressed ? .secondary : .tertiary)
-                .onHover { isHovered = $0 }
+                .onHover { hovering in
+                    isHovered = hovering
+                    if hovering {
+                        hoveredHint = hint
+                    } else if hoveredHint == hint {
+                        hoveredHint = nil
+                    }
+                }
+                .onChange(of: hint) { oldHint, newHint in
+                    if isHovered && hoveredHint == oldHint { hoveredHint = newHint }
+                }
+                .onDisappear {
+                    if hoveredHint == hint { hoveredHint = nil }
+                }
         }
     }
 }
