@@ -10,6 +10,15 @@ struct MeetingSettings: Sendable {
     let codexModel: String
     let codexReasoning: String
 
+    static func isCodexAvailable(at path: String) -> Bool {
+        let path = path.trimmingCharacters(in: .whitespacesAndNewlines).expandingTilde
+        guard !path.isEmpty else { return false }
+        let fm = FileManager.default
+        var isDirectory: ObjCBool = false
+        return fm.fileExists(atPath: path, isDirectory: &isDirectory)
+            && !isDirectory.boolValue && fm.isExecutableFile(atPath: path)
+    }
+
     static func registerDefaults() {
         UserDefaults.standard.register(defaults: [
             "outputDirectory": FileManager.default.homeDirectoryForCurrentUser

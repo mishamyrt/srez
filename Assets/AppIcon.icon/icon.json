@@ -6,7 +6,7 @@
   "fill" : {
     "linear-gradient" : [
       "display-p3:1.00000,1.00000,1.00000,1.00000",
-      "srgb:1.00000,0.99309,1.00000,1.00000"
+      "gray:0.92178,1.00000"
     ]
   },
   "groups" : [
@@ -15,63 +15,111 @@
         {
           "fill-specializations" : [
             {
-              "appearance" : "tinted",
+              "appearance" : "light",
               "value" : {
-                "solid" : "gray:0.85608,1.00000"
-              }
-            }
-          ],
-          "image-name" : "Frame 15 3.svg",
-          "name" : "Frame 15 3"
-        }
-      ],
-      "refractivity" : {
-        "depth" : 0,
-        "enabled" : true,
-        "strength" : 0
-      },
-      "shadow" : {
-        "kind" : "layer-color",
-        "opacity" : 0.37000000000000005
-      },
-      "specular" : true,
-      "translucency" : {
-        "enabled" : false,
-        "value" : 0.3
-      }
-    },
-    {
-      "layers" : [
-        {
-          "fill-specializations" : [
-            {
-              "value" : {
-                "solid" : "extended-gray:0.73263,1.00000"
+                "linear-gradient" : [
+                  "srgb:1.00000,0.00000,0.31569,1.00000",
+                  "display-p3:0.95525,0.44778,0.30162,1.00000"
+                ],
+                "orientation" : {
+                  "start" : {
+                    "x" : 0,
+                    "y" : 0.5
+                  },
+                  "stop" : {
+                    "x" : 1,
+                    "y" : 0.5
+                  }
+                }
               }
             },
             {
               "appearance" : "dark",
               "value" : {
-                "solid" : "gray:0.46857,1.00000"
+                "linear-gradient" : [
+                  "display-p3:1.00000,0.34003,0.54868,1.00000",
+                  "srgb:1.00000,0.64750,0.29897,1.00000"
+                ],
+                "orientation" : {
+                  "start" : {
+                    "x" : 0,
+                    "y" : 0.5
+                  },
+                  "stop" : {
+                    "x" : 1,
+                    "y" : 0.5
+                  }
+                }
               }
             },
             {
               "appearance" : "tinted",
               "value" : {
-                "solid" : "gray:0.73263,0.32000"
+                "solid" : "gray:1.00000,0.89967"
               }
             }
           ],
-          "image-name" : "Frame 16 2.svg",
-          "name" : "Frame 16 2"
+          "image-name" : "Frame 15.svg",
+          "name" : "Frame 15",
+          "opacity" : 1
         }
       ],
+      "name" : "List item",
+      "refractivity" : {
+        "depth" : 0,
+        "enabled" : true,
+        "strength" : 0
+      },
+      "shadow-specializations" : [
+        {
+          "value" : {
+            "kind" : "layer-color",
+            "opacity" : 0.45000000000000007
+          }
+        },
+        {
+          "appearance" : "dark",
+          "value" : {
+            "kind" : "layer-color",
+            "opacity" : 0.20000000000000007
+          }
+        }
+      ],
+      "specular" : true,
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.3
+      }
+    },
+    {
+      "blend-mode" : "normal",
+      "layers" : [
+        {
+          "fill-specializations" : [
+            {
+              "appearance" : "light",
+              "value" : {
+                "solid" : "display-p3:0.65780,0.57377,0.59302,0.58413"
+              }
+            },
+            {
+              "appearance" : "dark",
+              "value" : {
+                "solid" : "srgb:1.00000,1.00000,1.00000,0.24730"
+              }
+            }
+          ],
+          "image-name" : "Frame 18.svg",
+          "name" : "Frame 18"
+        }
+      ],
+      "name" : "Text",
       "shadow" : {
         "kind" : "neutral",
-        "opacity" : 0
+        "opacity" : 0.15
       },
       "translucency" : {
-        "enabled" : false,
+        "enabled" : true,
         "value" : 0.3
       }
     }

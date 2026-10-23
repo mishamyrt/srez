@@ -2,6 +2,31 @@ import XCTest
 @testable import Srez
 
 final class MeetingSettingsTests: XCTestCase {
+    func testCodexAvailabilityRequiresAnExecutableFile() throws {
+        let fm = FileManager.default
+        let directory = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try fm.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: directory) }
+        let executable = directory.appendingPathComponent("fake codex")
+        XCTAssertFalse(MeetingSettings.isCodexAvailable(at: ""))
+        XCTAssertFalse(MeetingSettings.isCodexAvailable(at: " \n"))
+        XCTAssertFalse(MeetingSettings.isCodexAvailable(at: executable.path))
+        XCTAssertFalse(MeetingSettings.isCodexAvailable(at: directory.path))
+
+        try "#!/bin/sh\nexit 0\n".write(to: executable, atomically: true, encoding: .utf8)
+        try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: executable.path)
+        XCTAssertFalse(MeetingSettings.isCodexAvailable(at: executable.path))
+        try fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        XCTAssertTrue(MeetingSettings.isCodexAvailable(at: executable.path))
+        XCTAssertTrue(MeetingSettings.isCodexAvailable(at: " \(executable.path)\n"))
+
+        let link = directory.appendingPathComponent("codex-link")
+        try fm.createSymbolicLink(at: link, withDestinationURL: executable)
+        XCTAssertTrue(MeetingSettings.isCodexAvailable(at: link.path))
+        try fm.removeItem(at: executable)
+        XCTAssertFalse(MeetingSettings.isCodexAvailable(at: link.path))
+    }
+
     func testBundledFFmpegOverridesLegacyPathAndSurvivesAppMove() async throws {
         let fm = FileManager.default
         let directory = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)

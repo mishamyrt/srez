@@ -89,6 +89,8 @@ final class MeetingsDelegate: NSObject, NSApplicationDelegate {
 struct MeetingsView: View {
     @ObservedObject var queue: MeetingQueue
     @AppStorage("outputDirectory") private var outputDirectory = ""
+    @AppStorage("codexPath") private var codexPath = ""
+    @State private var codexAvailable = false
     @State private var isScrolled = false
 
     var body: some View {
@@ -133,6 +135,12 @@ struct MeetingsView: View {
         }
         .background(Color(nsColor: .textBackgroundColor))
         .frame(minWidth: 360, minHeight: 320)
+        .task(id: codexPath) {
+            codexAvailable = MeetingSettings.isCodexAvailable(at: codexPath)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            codexAvailable = MeetingSettings.isCodexAvailable(at: codexPath)
+        }
         .toolbarBackground(Color(nsColor: .windowBackgroundColor), for: .windowToolbar)
         .toolbarBackground(.visible, for: .windowToolbar)
         .toolbar {
@@ -200,7 +208,7 @@ struct MeetingsView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             HStack(spacing: 8) {
-                if job.canSummarize {
+                if job.canSummarize && codexAvailable {
                     Button { queue.summarize(job.id) } label: {
                         Label {
                             Text("Summarize")
@@ -222,7 +230,7 @@ struct MeetingsView: View {
                     }
                     .help("Показать в Finder")
                 }
-                if job.state == .failed || job.state == .cancelled {
+                if (job.state == .failed || job.state == .cancelled) && (job.output == nil || codexAvailable) {
                     Button(job.retryTitle, systemImage: "arrow.clockwise.circle.fill") { queue.retry(job.id) }
                         .help(job.retryTitle)
                 }
@@ -246,14 +254,14 @@ struct MeetingsView: View {
                     Button("Открыть расшифровку") { NSWorkspace.shared.open(output.transcript) }
                 }
             }
-            if job.canSummarize {
+            if job.canSummarize && codexAvailable {
                 Button("Summarize") { queue.summarize(job.id) }
             }
             if job.state == .running || job.state == .waiting {
                 Button("Отменить") { queue.cancel(job.id) }
                     .disabled(job.stage == "Отмена…")
             }
-            if job.state == .failed || job.state == .cancelled {
+            if (job.state == .failed || job.state == .cancelled) && (job.output == nil || codexAvailable) {
                 Button(job.retryTitle) { queue.retry(job.id) }
             }
             Button("Убрать из списка") { queue.remove(job.id) }
@@ -308,12 +316,13 @@ struct MeetingSettingsView: View {
     @AppStorage("codexPath") private var codex = ""
     @AppStorage("codexModel") private var codexModel = "gpt-6-sol"
     @AppStorage("codexReasoning") private var codexReasoning = "medium"
+    @State private var codexAvailable = false
 
     var body: some View {
         Form {
             Section("Результаты") {
                 pathRow("Папка", value: $output, directory: true)
-                Text("Расшифровка сохраняется сразу, резюме создаётся по кнопке Summarize. Существующие файлы не перезаписываются.")
+                Text("Расшифровка сохраняется сразу, резюме создаётся по кнопке.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("Codex") {
@@ -324,7 +333,9 @@ struct MeetingSettingsView: View {
                 Picker("Рассуждение", selection: $codexReasoning) {
                     ForEach(MeetingSettings.reasoningLevels, id: \.self) { Text($0).tag($0) }
                 }
-                Text("Используется текущая авторизация CLI. Текст встречи отправляется в Codex; аудио обрабатывается локально.")
+                Text(codexAvailable
+                     ? "Используется текущая авторизация CLI. Текст встречи отправляется в Codex; аудио обрабатывается локально."
+                     : "Codex CLI не найден. Для суммаризации встреч установите Codex и авторизуйтесь в нём.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Text("Изменения применяются к следующему файлу в очереди или повторной попытке.")
@@ -333,6 +344,12 @@ struct MeetingSettingsView: View {
         .formStyle(.grouped)
         .padding(8)
         .frame(width: 610, height: 500)
+        .task(id: codex) {
+            codexAvailable = MeetingSettings.isCodexAvailable(at: codex)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            codexAvailable = MeetingSettings.isCodexAvailable(at: codex)
+        }
     }
 
     private func pathRow(_ title: String, value: Binding<String>, directory: Bool) -> some View {
