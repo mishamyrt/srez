@@ -89,6 +89,7 @@ final class MeetingsDelegate: NSObject, NSApplicationDelegate {
 struct MeetingsView: View {
     @ObservedObject var queue: MeetingQueue
     @AppStorage("outputDirectory") private var outputDirectory = ""
+    @State private var isScrolled = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -101,6 +102,19 @@ struct MeetingsView: View {
                 }
                 .padding(.horizontal, 12)
                 .padding(.top, 8)
+                .onGeometryChange(for: Bool.self) { geometry in
+                    geometry.frame(in: .named("meetingsScroll")).minY < 0
+                } action: { isScrolled = $0 }
+            }
+            .coordinateSpace(name: "meetingsScroll")
+            .overlay(alignment: .top) {
+                if isScrolled {
+                    Rectangle()
+                        .fill(Color(nsColor: .separatorColor))
+                        .frame(height: 0.5)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                }
             }
             Divider()
             HStack {
@@ -119,7 +133,8 @@ struct MeetingsView: View {
         }
         .background(Color(nsColor: .textBackgroundColor))
         .frame(minWidth: 360, minHeight: 320)
-        .toolbarBackground(.hidden, for: .windowToolbar)
+        .toolbarBackground(Color(nsColor: .windowBackgroundColor), for: .windowToolbar)
+        .toolbarBackground(.visible, for: .windowToolbar)
         .toolbar {
             if #available(macOS 26, *) {
                 ToolbarSpacer(.flexible, placement: .primaryAction)
