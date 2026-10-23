@@ -92,6 +92,7 @@ struct MeetingsView: View {
     @AppStorage("codexPath") private var codexPath = ""
     @State private var codexAvailable = false
     @State private var isScrolled = false
+    @State private var isOutputHovered = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -128,10 +129,33 @@ struct MeetingsView: View {
                     .help(outputDirectory)
                     .textSelection(.enabled)
                 Spacer()
+                Button("Выбрать папку результатов", systemImage: "folder") {
+                    let panel = NSOpenPanel()
+                    panel.title = "Выберите папку результатов"
+                    panel.canChooseDirectories = true
+                    panel.canChooseFiles = false
+                    panel.canCreateDirectories = true
+                    panel.prompt = "Выбрать"
+                    if !outputDirectory.isEmpty {
+                        panel.directoryURL = URL(fileURLWithPath: (outputDirectory as NSString).expandingTildeInPath)
+                    }
+                    if panel.runModal() == .OK, let url = panel.url { outputDirectory = url.path }
+                }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.plain)
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .frame(width: 16, height: 14)
+                .help("Выбрать папку результатов")
+                .opacity(isOutputHovered ? 1 : 0)
+                .allowsHitTesting(isOutputHovered)
+                .accessibilityHidden(!isOutputHovered)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .background(Color(nsColor: .windowBackgroundColor))
+            .contentShape(Rectangle())
+            .onHover { isOutputHovered = $0 }
         }
         .background(Color(nsColor: .textBackgroundColor))
         .frame(minWidth: 360, minHeight: 320)
@@ -157,7 +181,7 @@ struct MeetingsView: View {
     private var windowActions: some ToolbarContent {
         ToolbarItem(placement: .primaryAction) {
             HStack(spacing: 6) {
-                Button("Открыть запись…", systemImage: "folder") { queue.chooseFiles() }
+                Button("Открыть запись…", systemImage: "document") { queue.chooseFiles() }
                     .disabled(queue.pickerPresented)
                     .help("Открыть запись… (⌘O)")
                 SettingsLink {
@@ -369,7 +393,6 @@ struct MeetingSettingsView: View {
                 .font(.caption).foregroundStyle(.secondary)
         }
         .formStyle(.grouped)
-        .padding(8)
         .frame(width: 610, height: 500)
         .task(id: codex) {
             codexAvailable = MeetingSettings.isCodexAvailable(at: codex)
@@ -380,21 +403,26 @@ struct MeetingSettingsView: View {
     }
 
     private func pathRow(_ title: String, value: Binding<String>, directory: Bool) -> some View {
-        LabeledContent(title) {
-            HStack {
-                TextField(title, text: value).labelsHidden()
-                Button("Выбрать…") {
-                    let panel = NSOpenPanel()
-                    panel.canChooseDirectories = directory
-                    panel.canChooseFiles = !directory
-                    panel.canCreateDirectories = directory
-                    panel.prompt = "Выбрать"
-                    if !value.wrappedValue.isEmpty {
-                        panel.directoryURL = URL(fileURLWithPath: (value.wrappedValue as NSString).expandingTildeInPath)
-                    }
-                    if panel.runModal() == .OK, let url = panel.url { value.wrappedValue = url.path }
+        HStack(spacing: 12) {
+            Text(title).fixedSize()
+            TextField(title, text: value)
+                .labelsHidden()
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .multilineTextAlignment(.trailing)
+                .frame(minWidth: 0, maxWidth: .infinity)
+            Button("Выбрать…") {
+                let panel = NSOpenPanel()
+                panel.canChooseDirectories = directory
+                panel.canChooseFiles = !directory
+                panel.canCreateDirectories = directory
+                panel.prompt = "Выбрать"
+                if !value.wrappedValue.isEmpty {
+                    panel.directoryURL = URL(fileURLWithPath: (value.wrappedValue as NSString).expandingTildeInPath)
                 }
+                if panel.runModal() == .OK, let url = panel.url { value.wrappedValue = url.path }
             }
+            .fixedSize()
         }
     }
 }

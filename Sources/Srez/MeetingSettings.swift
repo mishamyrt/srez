@@ -25,11 +25,11 @@ struct MeetingSettings: Sendable {
                 .appendingPathComponent("Documents/Встречи").path,
             "ffmpegPath": executablePath("ffmpeg"),
             "codexPath": executablePath("codex"),
-            "codexModel": "gpt-6-sol",
+            "codexModel": "gpt-6-luna",
             "codexReasoning": "medium"
         ])
         if !codexModels.contains(UserDefaults.standard.string(forKey: "codexModel") ?? "") {
-            UserDefaults.standard.set("gpt-6-sol", forKey: "codexModel")
+            UserDefaults.standard.set("gpt-6-luna", forKey: "codexModel")
         }
         if !reasoningLevels.contains(UserDefaults.standard.string(forKey: "codexReasoning") ?? "") {
             UserDefaults.standard.set("medium", forKey: "codexReasoning")
