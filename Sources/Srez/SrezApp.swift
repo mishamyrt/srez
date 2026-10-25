@@ -254,7 +254,7 @@ private struct MeetingJobView: View {
                                 Image(systemName: "circle.fill")
                                 Image("Summarize", bundle: .module)
                                     .resizable()
-                                    .frame(width: 9, height: 9)
+                                    .frame(width: 10, height: 10)
                                     .foregroundStyle(Color(nsColor: .textBackgroundColor))
                             }
                         }
@@ -294,7 +294,7 @@ private struct MeetingJobView: View {
                 }
             }
             if job.canSummarize && codexAvailable {
-                Button("Summarize") { queue.summarize(job.id) }
+                Button("Суммаризировать") { queue.summarize(job.id) }
             }
             if job.state == .running || job.state == .waiting {
                 Button("Отменить") { queue.cancel(job.id) }
@@ -377,10 +377,8 @@ struct MeetingSettingsView: View {
 
     var body: some View {
         Form {
-            Section("Результаты") {
-                pathRow("Папка", value: $output, directory: true)
-                Text("Расшифровка сохраняется сразу, резюме создаётся по кнопке.")
-                    .font(.caption).foregroundStyle(.secondary)
+            Section() {
+                pathRow("Папка с результатами", value: $output, directory: true)
             }
             Section("Codex") {
                 pathRow("Codex CLI", value: $codex, directory: false)
@@ -395,8 +393,6 @@ struct MeetingSettingsView: View {
                      : "Codex CLI не найден. Для суммаризации встреч установите Codex и авторизуйтесь в нём.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            Text("Изменения применяются к следующему файлу в очереди или повторной попытке.")
-                .font(.caption).foregroundStyle(.secondary)
         }
         .formStyle(.grouped)
         .frame(width: 610, height: 500)
@@ -410,13 +406,17 @@ struct MeetingSettingsView: View {
 
     private func pathRow(_ title: String, value: Binding<String>, directory: Bool) -> some View {
         HStack(spacing: 12) {
-            Text(title).fixedSize()
-            TextField(title, text: value)
-                .labelsHidden()
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .multilineTextAlignment(.trailing)
-                .frame(minWidth: 0, maxWidth: .infinity)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).fixedSize()
+                Text(value.wrappedValue)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(value.wrappedValue)
+                    .textSelection(.enabled)
+            }
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
             Button("Выбрать…") {
                 let panel = NSOpenPanel()
                 panel.canChooseDirectories = directory
