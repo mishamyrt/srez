@@ -159,6 +159,12 @@ struct MeetingsView: View {
         }
         .background(Color(nsColor: .textBackgroundColor))
         .frame(minWidth: 360, minHeight: 320)
+        .dropDestination(for: URL.self) { urls, _ in
+            let files = urls.filter(\.isFileURL)
+            guard !files.isEmpty else { return false }
+            queue.enqueue(files)
+            return true
+        }
         .task(id: codexPath) {
             codexAvailable = MeetingSettings.isCodexAvailable(at: codexPath)
         }
