@@ -7,7 +7,8 @@ final class MeetingPipelineTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
         let transcript = directory.appendingPathComponent("recording.raw.txt")
         try "исходный текст".write(to: transcript, atomically: true, encoding: .utf8)
-        let summary = MeetingSummary(title: "../План: релиз/осень", markdown: "# План\nГотовим релиз.")
+        let summary = MeetingSummary(title: "../План: релиз/осень", meetingType: .project,
+                                     summary: [.init(text: "Готовим релиз.", sourceIDs: ["p1s1"])])
         let first = try MeetingPipeline.save(summary, transcript: transcript, directory: directory)
         XCTAssertEqual(first.summary?.lastPathComponent, "План релиз осень.md")
         XCTAssertEqual(first.transcript, transcript)
@@ -55,32 +56,19 @@ final class MeetingPipelineTests: XCTestCase {
     func testSummarizesSavedTranscriptAndPassesModel() async throws {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let cli = directory.appendingPathComponent("fake-codex")
-        // A local CLI stand-in exercises stdin, argument boundaries and structured output without a network call.
-        let script = #"""
-        #!/bin/sh
-        while [ "$#" -gt 0 ]; do
-            case "$1" in
-                --output-last-message) shift; result="$1" ;;
-                --model) shift; model="$1" ;;
-                --config|-c) shift
-                    case "$1" in model_reasoning_effort=*) reasoning="$1" ;; esac ;;
-            esac
-            shift
-        done
-        [ "$model" = 'test-model' ] || exit 20
-        [ "$reasoning" = 'model_reasoning_effort="high"' ] || exit 22
-        input=$(cat)
-        case "$input" in *Обсудили*) ;; *) exit 21 ;; esac
-        printf '%s' '{"title":"План встречи","markdown":"# План встречи\nОбсудили выпуск."}' > "$result"
-        """#
-        try script.write(to: cli, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: cli.path)
-        let settings = MeetingSettings(
-            outputDirectory: directory,
-            ffmpeg: directory.appendingPathComponent("missing-ffmpeg"), codex: cli,
-            codexModel: "test-model", codexReasoning: "high"
+        let notes = ["p1s1", "p2s1"].map { id in
+            MeetingNotes(topics: [.init(title: "Выпуск", kind: .project, details: [
+                .init(kind: .status, text: "Обсудили выпуск.", sourceIDs: [id])
+            ])])
+        }
+        let summary = MeetingSummary(
+            title: "План встречи", meetingType: .project,
+            summary: [.init(text: "Обсудили выпуск.", sourceIDs: ["p1s1", "p2s1"])],
+            topics: notes.flatMap(\.topics)
         )
+        let encoder = JSONEncoder()
+        let settings = try codexSettings(in: directory, responses: notes.map { try encoder.encode($0) }
+                                        + [try encoder.encode(summary)])
         let transcript = String(repeating: "Обсудили выпуск. ", count: 2_000)
         let transcription = try await MeetingPipeline.run(
             input: directory.appendingPathComponent("missing-audio.wav"),
@@ -91,6 +79,124 @@ final class MeetingPipelineTests: XCTestCase {
         XCTAssertEqual(output.transcript, transcription.transcript)
         XCTAssertEqual(try String(contentsOf: output.transcript), transcript)
         XCTAssertTrue(try String(contentsOf: XCTUnwrap(output.summary)).contains("Обсудили выпуск"))
+        XCTAssertEqual(try String(contentsOf: directory.appendingPathComponent("calls")), "3\n")
+        let first = try requestData(in: directory, call: 1)
+        let second = try requestData(in: directory, call: 2)
+        let firstSources = try JSONDecoder().decode([TranscriptSource].self, from: first)
+        let secondSources = try JSONDecoder().decode([TranscriptSource].self, from: second)
+        XCTAssertEqual(secondSources.first?.id, firstSources.last?.id)
+        XCTAssertEqual((firstSources + secondSources.dropFirst()).map(\.text).joined(), transcript)
+        let finalNotes = try JSONDecoder().decode([MeetingNotes].self, from: requestData(in: directory, call: 3))
+        XCTAssertEqual(finalNotes.map(\.sourceIDs), [Set(["p1s1"]), Set(["p2s1"])])
+        let partialSchema = try String(contentsOf: directory.appendingPathComponent("schema-1.json"))
+        let finalSchema = try String(contentsOf: directory.appendingPathComponent("schema-3.json"))
+        XCTAssertFalse(partialSchema.contains("meeting_type"))
+        XCTAssertTrue(finalSchema.contains("meeting_type"))
+        XCTAssertFalse(finalSchema.contains("markdown"))
+    }
+
+    func testShortTranscriptUsesOneCallAndOmitsAbsentSections() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let summary = MeetingSummary(title: "Обратная связь", meetingType: .oneOnOne, topics: [
+            .init(title: "Нагрузка", kind: .oneOnOne, details: [
+                .init(kind: .concern, text: "Слишком много параллельных задач.", sourceIDs: ["p1s1"])
+            ])
+        ])
+        let settings = try codexSettings(in: directory, responses: [JSONEncoder().encode(summary)])
+        let output = try await MeetingPipeline.run(
+            input: directory.appendingPathComponent("meeting.wav"), settings: settings,
+            transcript: "Слишком много параллельных задач.", update: { _ in }
+        )
+        let result = try await MeetingPipeline.summarize(output, settings: settings, update: { _ in })
+        let markdown = try String(contentsOf: XCTUnwrap(result.summary))
+        XCTAssertFalse(markdown.contains("Тип встречи:"))
+        XCTAssertTrue(markdown.contains("## Обсуждавшиеся вопросы"))
+        for title in ["Краткое резюме", "Решения", "Задачи", "Открытые вопросы", "Не зафиксировано"] {
+            XCTAssertFalse(markdown.contains(title))
+        }
+        XCTAssertEqual(try String(contentsOf: directory.appendingPathComponent("calls")), "1\n")
+        let sources = try JSONDecoder().decode([TranscriptSource].self, from: requestData(in: directory, call: 1))
+        XCTAssertEqual(sources.map(\.text).joined(), "Слишком много параллельных задач.")
+    }
+
+    func testInvalidSummaryKeepsTranscriptAndDoesNotSaveMarkdown() async throws {
+        let invalidResponses = [
+            #"{"title":"старый формат","markdown":"текст"}"#,
+            #"{"title":"тема","meeting_type":"unknown","summary":[],"topics":[],"decisions":[],"actions":[],"open_questions":[]}"#,
+            #"{"title":"тема","meeting_type":"general","summary":[{"text":"вывод","source_ids":["missing"]}],"topics":[],"decisions":[],"actions":[],"open_questions":[]}"#,
+            #"{"title":"тема","meeting_type":"general","summary":[],"topics":[],"decisions":[],"actions":[],"open_questions":[]}"#
+        ]
+        for response in invalidResponses {
+            let directory = try temporaryDirectory()
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let settings = try codexSettings(in: directory, responses: [Data(response.utf8)])
+            let output = try await MeetingPipeline.run(
+                input: directory.appendingPathComponent("meeting.wav"), settings: settings,
+                transcript: "Исходный текст.", update: { _ in }
+            )
+            do {
+                _ = try await MeetingPipeline.summarize(output, settings: settings, update: { _ in })
+                XCTFail("Expected invalid summary to fail")
+            } catch { XCTAssertTrue(error is MeetingError) }
+            XCTAssertEqual(try String(contentsOf: output.transcript), "Исходный текст.")
+            XCTAssertFalse(try FileManager.default.contentsOfDirectory(atPath: directory.path).contains { $0.hasSuffix(".md") })
+        }
+    }
+
+    func testFinalSummaryCannotCiteUnextractedSource() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let notes = MeetingNotes(topics: [.init(title: "Тема", kind: .general, details: [
+            .init(kind: .fact, text: "Факт.", sourceIDs: ["p1s1"])
+        ])])
+        let summary = MeetingSummary(title: "Тема", meetingType: .general,
+                                     summary: [.init(text: "Факт.", sourceIDs: ["p2s1"])])
+        let encoder = JSONEncoder()
+        let settings = try codexSettings(in: directory, responses: [
+            encoder.encode(notes), encoder.encode(MeetingNotes()), encoder.encode(summary)
+        ])
+        let output = try await MeetingPipeline.run(
+            input: directory.appendingPathComponent("meeting.wav"), settings: settings,
+            transcript: String(repeating: "Факт. ", count: 5_000), update: { _ in }
+        )
+        do {
+            _ = try await MeetingPipeline.summarize(output, settings: settings, update: { _ in })
+            XCTFail("Expected source outside extracted facts to fail")
+        } catch { XCTAssertTrue(error.localizedDescription.contains("вне извлечённых")) }
+    }
+
+    func testInvalidPartialFactsStopBeforeMerge() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let invalid = MeetingNotes(actions: [.init(text: "Проверить.", sourceIDs: ["p2s1"])])
+        let settings = try codexSettings(in: directory, responses: [JSONEncoder().encode(invalid)])
+        let output = try await MeetingPipeline.run(
+            input: directory.appendingPathComponent("meeting.wav"), settings: settings,
+            transcript: String(repeating: "Факт. ", count: 5_000), update: { _ in }
+        )
+        do {
+            _ = try await MeetingPipeline.summarize(output, settings: settings, update: { _ in })
+            XCTFail("Expected facts citing a different part to fail")
+        } catch { XCTAssertTrue(error.localizedDescription.contains("источника")) }
+        XCTAssertEqual(try String(contentsOf: directory.appendingPathComponent("calls")), "1\n")
+        XCTAssertFalse(try FileManager.default.contentsOfDirectory(atPath: directory.path).contains { $0.hasSuffix(".md") })
+    }
+
+    func testBlankTranscriptDoesNotCallCodex() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let settings = try codexSettings(in: directory, responses: [])
+        let output = try await MeetingPipeline.run(
+            input: directory.appendingPathComponent("meeting.wav"), settings: settings,
+            transcript: " \n ", update: { _ in }
+        )
+        do {
+            _ = try await MeetingPipeline.summarize(output, settings: settings, update: { _ in })
+            XCTFail("Expected a blank transcript to fail")
+        } catch { XCTAssertTrue(error.localizedDescription.contains("Расшифровка пуста")) }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("calls").path))
+        XCTAssertEqual(try String(contentsOf: output.transcript), " \n ")
     }
 
     func testProcessFailureAndCancellation() async throws {
@@ -122,5 +228,46 @@ final class MeetingPipelineTests: XCTestCase {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory
+    }
+
+    // Exercise the real CLI boundary and preserve each request for assertions, without a network call.
+    private func codexSettings(in directory: URL, responses: [Data]) throws -> MeetingSettings {
+        for (index, response) in responses.enumerated() {
+            try response.write(to: directory.appendingPathComponent("response-\(index + 1).json"))
+        }
+        let cli = directory.appendingPathComponent("fake-codex")
+        try #"""
+        #!/bin/sh
+        while [ "$#" -gt 0 ]; do
+            case "$1" in
+                --output-last-message) shift; result="$1" ;;
+                --output-schema) shift; schema="$1" ;;
+                --model) shift; model="$1" ;;
+                --config|-c) shift
+                    case "$1" in model_reasoning_effort=*) reasoning="$1" ;; esac ;;
+            esac
+            shift
+        done
+        [ "$model" = 'test-model' ] || exit 20
+        [ "$reasoning" = 'model_reasoning_effort="high"' ] || exit 22
+        stubdir=$(dirname "$0")
+        count=0
+        if [ -f "$stubdir/calls" ]; then count=$(cat "$stubdir/calls"); fi
+        count=$((count + 1))
+        echo "$count" > "$stubdir/calls"
+        cat > "$stubdir/request-$count.txt"
+        cp "$schema" "$stubdir/schema-$count.json"
+        cp "$stubdir/response-$count.json" "$result"
+        """#.write(to: cli, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: cli.path)
+        return MeetingSettings(outputDirectory: directory, ffmpeg: directory.appendingPathComponent("missing-ffmpeg"),
+                               codex: cli, codexModel: "test-model", codexReasoning: "high")
+    }
+
+    private func requestData(in directory: URL, call: Int) throws -> Data {
+        let prompt = try String(contentsOf: directory.appendingPathComponent("request-\(call).txt"))
+        let start = try XCTUnwrap(prompt.range(of: "<meeting_data>\n"))
+        let end = try XCTUnwrap(prompt.range(of: "\n</meeting_data>", options: .backwards))
+        return Data(prompt[start.upperBound..<end.lowerBound].utf8)
     }
 }

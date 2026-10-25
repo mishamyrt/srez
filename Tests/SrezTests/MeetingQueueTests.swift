@@ -231,7 +231,7 @@ final class MeetingQueueTests: XCTestCase {
             shift
         done
         cat > /dev/null
-        printf '%s' '{"title":"План встречи","markdown":"# План встречи\nОбсудили выпуск."}' > "$result"
+        printf '%s' '{"title":"План встречи","meeting_type":"project","summary":[{"text":"Обсудили выпуск.","source_ids":["p1s1"]}],"topics":[],"decisions":[],"actions":[],"open_questions":[]}' > "$result"
         """#.write(to: cli, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: cli.path)
     }
