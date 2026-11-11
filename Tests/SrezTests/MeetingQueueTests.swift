@@ -3,6 +3,71 @@ import XCTest
 
 final class MeetingQueueTests: XCTestCase {
     @MainActor
+    func testCombinedSummaryPreservesOriginalJobsAndCanRetry() async throws {
+        let fm = FileManager.default
+        let directory = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try fm.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: directory) }
+        let cli = directory.appendingPathComponent("fake-codex")
+        try "#!/bin/sh\nexit 7\n".write(to: cli, atomically: true, encoding: .utf8)
+        try fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: cli.path)
+        let defaults = UserDefaults.standard
+        let settings = ["outputDirectory": directory.path, "codexPath": cli.path, "ffmpegPath": ""]
+        let previous = settings.keys.map { ($0, defaults.object(forKey: $0)) }
+        defer { for (key, value) in previous { defaults.set(value, forKey: key) } }
+        for (key, value) in settings { defaults.set(value, forKey: key) }
+
+        let texts = ["Первая запись.", "Вторая запись.", "Не выбрана."]
+        let originals = try texts.enumerated().map { index, text in
+            let transcript = directory.appendingPathComponent("\(index).raw.txt")
+            try text.write(to: transcript, atomically: true, encoding: .utf8)
+            var job = MeetingJob(input: directory.appendingPathComponent("\(index).mp3"))
+            job.state = .done
+            job.output = MeetingOutput(transcript: transcript)
+            return job
+        }
+        let existingSummary = directory.appendingPathComponent("existing.md")
+        try "Прежний конспект.".write(to: existingSummary, atomically: true, encoding: .utf8)
+        let queue = MeetingQueue()
+        queue.jobs = originals
+        queue.jobs[1].output?.summary = existingSummary
+
+        try queue.summarizeTogether([])
+        try queue.summarizeTogether([originals[0].id])
+        try queue.summarizeTogether([originals[0].id, UUID()])
+        queue.jobs[1].state = .running
+        try queue.summarizeTogether([originals[1].id, originals[0].id])
+        XCTAssertEqual(queue.jobs.count, 3)
+        queue.jobs[1].state = .done
+        try queue.summarizeTogether([originals[1].id, originals[0].id])
+        XCTAssertEqual(queue.jobs.count, 4)
+        XCTAssertTrue(queue.jobs.prefix(3).allSatisfy { $0.state == .done })
+        let combined = try XCTUnwrap(queue.jobs.last)
+        let transcript = try XCTUnwrap(combined.output?.transcript)
+        let expected = texts.prefix(2).joined(separator: "\n\n")
+        XCTAssertEqual(try String(contentsOf: transcript), expected)
+        try await waitForQueue(queue)
+        XCTAssertEqual(queue.jobs.last?.state, .failed)
+        XCTAssertEqual(queue.jobs.last?.retryTitle, "Повторить суммаризацию")
+        XCTAssertEqual(queue.jobs.last?.output?.file, transcript)
+
+        queue.remove(originals[0].id)
+        try writeCodex(to: cli)
+        queue.retry(combined.id)
+        try await waitForQueue(queue)
+        XCTAssertEqual(queue.jobs.last?.state, .done)
+        XCTAssertNotNil(queue.jobs.last?.output?.summary)
+        XCTAssertEqual(queue.jobs.last?.output?.transcript, transcript)
+        let request = try String(contentsOf: directory.appendingPathComponent("request.txt"))
+        XCTAssertTrue(request.contains("Первая запись.\\n\\nВторая запись."))
+        XCTAssertFalse(request.contains(texts[2]))
+        XCTAssertEqual(try String(contentsOf: directory.appendingPathComponent("calls")), "call\n")
+        XCTAssertEqual(try originals.map { try String(contentsOf: XCTUnwrap($0.output?.transcript)) }, texts)
+        XCTAssertEqual(try String(contentsOf: existingSummary), "Прежний конспект.")
+        XCTAssertEqual(queue.jobs[0].output?.summary, existingSummary)
+    }
+
+    @MainActor
     func testSeparateQueuesRunInParallelAndCancelIndependently() async throws {
         let fm = FileManager.default
         let directory = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -230,7 +295,9 @@ final class MeetingQueueTests: XCTestCase {
             case "$1" in --output-last-message) shift; result="$1" ;; esac
             shift
         done
-        cat > /dev/null
+        stubdir=$(dirname "$0")
+        cat > "$stubdir/request.txt"
+        echo call >> "$stubdir/calls"
         printf '%s' '{"title":"План встречи","meeting_type":"project","summary":[{"text":"Обсудили выпуск.","source_ids":["p1s1"]}],"topics":[],"decisions":[],"actions":[],"open_questions":[]}' > "$result"
         """#.write(to: cli, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: cli.path)

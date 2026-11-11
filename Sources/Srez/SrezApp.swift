@@ -93,17 +93,22 @@ struct MeetingsView: View {
     @State private var codexAvailable = false
     @State private var isScrolled = false
     @State private var isOutputHovered = false
+    @State private var selectedIDs: Set<UUID> = []
+    @State private var summaryError: String?
+
+    private var selectableIDs: Set<UUID> {
+        Set(queue.jobs.filter(\.canSelectForSummary).map(\.id))
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(queue.jobs) { job in
-                        MeetingJobView(job: job, queue: queue, codexAvailable: codexAvailable)
-                        Divider().padding(.leading, 46)
+                        MeetingJobView(job: job, queue: queue, codexAvailable: codexAvailable,
+                                       selectedIDs: $selectedIDs)
                     }
                 }
-                .padding(.horizontal, 12)
                 .padding(.top, 8)
                 .onGeometryChange(for: Bool.self) { geometry in
                     geometry.frame(in: .named("meetingsScroll")).minY < 0
@@ -120,6 +125,31 @@ struct MeetingsView: View {
                 }
             }
             Divider()
+            if !selectedIDs.isEmpty {
+                HStack {
+                    Text("Выбрано: \(selectedIDs.count)")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Суммаризировать вместе") {
+                        do {
+                            try queue.summarizeTogether(selectedIDs)
+                            selectedIDs.removeAll()
+                        } catch {
+                            summaryError = error.localizedDescription
+                        }
+                    }
+                    .disabled(selectedIDs.count < 2 || !codexAvailable)
+                    .help("Объединить расшифровки в порядке списка и создать общий конспект")
+                    Button("Снять выделение", systemImage: "xmark") { selectedIDs.removeAll() }
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(.plain)
+                }
+                .controlSize(.small)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                Divider()
+            }
             HStack {
                 Text((outputDirectory as NSString).abbreviatingWithTildeInPath)
                     .font(.system(size: 11))
@@ -171,6 +201,14 @@ struct MeetingsView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             codexAvailable = MeetingSettings.isCodexAvailable(at: codexPath)
         }
+        .onChange(of: selectableIDs) { _, ids in selectedIDs.formIntersection(ids) }
+        .alert("Не удалось объединить расшифровки", isPresented: Binding(
+            get: { summaryError != nil }, set: { if !$0 { summaryError = nil } }
+        )) {
+            Button("ОК", role: .cancel) { summaryError = nil }
+        } message: {
+            Text(summaryError ?? "")
+        }
         .toolbarBackground(Color(nsColor: .windowBackgroundColor), for: .windowToolbar)
         .toolbarBackground(.visible, for: .windowToolbar)
         .toolbar {
@@ -205,10 +243,11 @@ struct MeetingsView: View {
 
 }
 
-private struct MeetingJobView: View {
+struct MeetingJobView: View {
     let job: MeetingJob
     @ObservedObject var queue: MeetingQueue
     let codexAvailable: Bool
+    @Binding var selectedIDs: Set<UUID>
     @State private var hoveredHint: String?
 
     var body: some View {
@@ -281,9 +320,29 @@ private struct MeetingJobView: View {
             .font(.system(size: 14))
         }
         .padding(.vertical, 10)
+        .padding(.horizontal, 12)
+        .background(selectedIDs.contains(job.id) ? Color.accentColor.opacity(0.18) : Color.clear)
+        .overlay(alignment: .bottom) {
+            Divider()
+                .padding(.leading, 58)
+                .padding(.trailing, 12)
+                .allowsHitTesting(false)
+        }
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {
-            if let output = job.output { NSWorkspace.shared.open(output.file) }
+            if NSApp.currentEvent?.modifierFlags.contains(.command) != true, let output = job.output {
+                NSWorkspace.shared.open(output.file)
+            }
+        }
+        // Run alongside the double-click gesture so selection does not wait for its timeout.
+        .simultaneousGesture(TapGesture().modifiers(.command).onEnded { toggleSelection() })
+        .accessibilityAddTraits(selectedIDs.contains(job.id) ? .isSelected : [])
+        .accessibilityActions {
+            if codexAvailable && job.canSelectForSummary {
+                Button(selectedIDs.contains(job.id) ? "Снять выделение" : "Выбрать для общей суммаризации") {
+                    toggleSelection()
+                }
+            }
         }
         .contextMenu {
             if let output = job.output {
@@ -305,6 +364,12 @@ private struct MeetingJobView: View {
             }
             Button("Убрать из списка") { queue.remove(job.id) }
         }
+    }
+
+    private func toggleSelection() {
+        guard codexAvailable && job.canSelectForSummary else { return }
+        if selectedIDs.contains(job.id) { selectedIDs.remove(job.id) }
+        else { selectedIDs.insert(job.id) }
     }
 }
 

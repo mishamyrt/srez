@@ -12,7 +12,8 @@ struct MeetingJob: Identifiable {
     var transcript: String?
     var output: MeetingOutput?
     var error: String?
-    var canSummarize: Bool { state == .done && output != nil && output?.summary == nil }
+    var canSelectForSummary: Bool { state == .done && output != nil }
+    var canSummarize: Bool { canSelectForSummary && output?.summary == nil }
     var retryTitle: String { output == nil ? "Повторить" : "Повторить суммаризацию" }
 }
 
@@ -86,6 +87,19 @@ final class MeetingQueue: ObservableObject {
         guard let index = jobs.firstIndex(where: { $0.id == id }), jobs[index].canSummarize else { return }
         jobs[index].state = .waiting
         jobs[index].stage = "В очереди на суммаризацию"
+        startNext()
+    }
+
+    func summarizeTogether(_ ids: Set<UUID>) throws {
+        let selected = jobs.filter { ids.contains($0.id) && $0.canSelectForSummary }
+        guard selected.count > 1, selected.count == ids.count else { return }
+        let settings = try MeetingSettings.current(summarizing: true)
+        let output = try MeetingPipeline.combineTranscripts(selected.compactMap(\.output),
+                                                           directory: settings.outputDirectory)
+        var job = MeetingJob(input: output.transcript)
+        job.output = output
+        job.stage = "В очереди на суммаризацию"
+        jobs.append(job)
         startNext()
     }
 

@@ -2,6 +2,43 @@ import XCTest
 @testable import Srez
 
 final class MeetingPipelineTests: XCTestCase {
+    func testCombinesTranscriptsWithoutOverwritingSourcesOrPreviousResults() throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let texts = ["Первая запись.\n", "Вторая запись."]
+        let outputs = try texts.enumerated().map { index, text in
+            let transcript = directory.appendingPathComponent("\(index).raw.txt")
+            try text.write(to: transcript, atomically: true, encoding: .utf8)
+            return MeetingOutput(transcript: transcript)
+        }
+        let results = directory.appendingPathComponent("results")
+        let first = try MeetingPipeline.combineTranscripts(outputs, directory: results)
+        let second = try MeetingPipeline.combineTranscripts(outputs, directory: results)
+        XCTAssertNil(first.summary)
+        XCTAssertNotEqual(first.transcript, second.transcript)
+        for output in [first, second] {
+            XCTAssertEqual(try String(contentsOf: output.transcript), texts.joined(separator: "\n\n"))
+        }
+        XCTAssertEqual(try outputs.map { try String(contentsOf: $0.transcript) }, texts)
+    }
+
+    func testCombiningBlankOrMissingTranscriptDoesNotSavePartialText() throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let valid = directory.appendingPathComponent("valid.raw.txt")
+        let blank = directory.appendingPathComponent("blank.raw.txt")
+        try "Исходный текст.".write(to: valid, atomically: true, encoding: .utf8)
+        try " \n ".write(to: blank, atomically: true, encoding: .utf8)
+        let results = directory.appendingPathComponent("results")
+        for invalid in [blank, directory.appendingPathComponent("missing.raw.txt")] {
+            XCTAssertThrowsError(try MeetingPipeline.combineTranscripts(
+                [MeetingOutput(transcript: valid), MeetingOutput(transcript: invalid)], directory: results
+            ))
+            XCTAssertFalse(FileManager.default.fileExists(atPath: results.path))
+        }
+        XCTAssertEqual(try String(contentsOf: valid), "Исходный текст.")
+    }
+
     func testSummaryNamesAndTranscriptPreservation() throws {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
