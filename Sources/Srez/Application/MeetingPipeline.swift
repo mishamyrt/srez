@@ -65,23 +65,14 @@ enum MeetingPipeline {
 
     static func summarize(
         _ output: MeetingOutput, settings: MeetingSettings,
+        provider: (any SummaryProvider)? = nil,
         update: @escaping @Sendable (MeetingEvent) async -> Void
     ) async throws -> MeetingOutput {
-        let fm = FileManager.default
-        guard fm.isExecutableFile(atPath: settings.codex.path) else {
-            throw MeetingError(
-                message: "Не найден Codex CLI. Укажите путь к codex в настройках."
-            )
-        }
+        let provider = provider ?? SummaryProviderFactory.make(.codex(.init(
+            executable: settings.codex, model: settings.codexModel,
+            reasoning: settings.codexReasoning
+        )))
         try MeetingFileStore.prepareOutputDirectory(settings.outputDirectory)
-        let work = fm.temporaryDirectory
-            .appendingPathComponent("GigaAM-\(UUID().uuidString)")
-        try fm.createDirectory(
-            at: work,
-            withIntermediateDirectories: true,
-            attributes: [.posixPermissions: 0o700]
-        )
-        defer { try? fm.removeItem(at: work) }
         try Task.checkCancellation()
         let text = try String(contentsOf: output.transcript, encoding: .utf8)
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -113,7 +104,7 @@ enum MeetingPipeline {
                     )
                 )
                 let extracted: MeetingNotes = try await requestSummary(
-                    input, settings: settings, directory: work, partial: true
+                    input, provider: provider, partial: true
                 )
                 try extracted.validate(sources: input)
                 notes.append(extracted)
@@ -133,7 +124,7 @@ enum MeetingPipeline {
                     .stage("Сжатие фактов: часть \(index + 1) из \(groups.count)…")
                 )
                 let merged: MeetingNotes = try await requestSummary(
-                    group, settings: settings, directory: work, partial: true,
+                    group, provider: provider, partial: true,
                     merging: true
                 )
                 try merged.validate(sources: sources)
@@ -158,14 +149,12 @@ enum MeetingPipeline {
         if notes.isEmpty {
             summary = try await requestSummary(
                 sources,
-                settings: settings,
-                directory: work
+                provider: provider
             )
         } else {
             summary = try await requestSummary(
                 notes,
-                settings: settings,
-                directory: work,
+                provider: provider,
                 merging: true
             )
         }
@@ -219,11 +208,20 @@ enum MeetingPipeline {
     static func summaryPrompt(
         _ values: [some Encodable], partial: Bool, merging: Bool = false
     ) throws -> String {
-        guard let data = try String(bytes: JSONEncoder().encode(values), encoding: .utf8)
-        else {
-            throw MeetingError(message: "Не удалось подготовить запрос суммаризации.")
-        }
-        return MeetingSummaryFormat.prompt(data: data, partial: partial, merging: merging)
+        try summaryRequest(values, partial: partial, merging: merging).prompt
+    }
+
+    private static func summaryRequest(
+        _ values: [some Encodable], partial: Bool, merging: Bool
+    ) throws -> SummaryRequest {
+        try SummaryRequest(
+            instructions: SummaryPromptBuilder.instructions(
+                partial: partial,
+                merging: merging
+            ),
+            input: JSONEncoder().encode(values),
+            outputSchema: SummarySchema.make(partial: partial)
+        )
     }
 
     static func summaryInputGroups<Value: Encodable>(
@@ -255,40 +253,18 @@ enum MeetingPipeline {
     }
 
     private static func requestSummary<Result: Decodable>(
-        _ input: [some Encodable], settings: MeetingSettings, directory: URL,
+        _ input: [some Encodable], provider: any SummaryProvider,
         partial: Bool = false, merging: Bool = false
     ) async throws -> Result {
-        let instruction = try summaryPrompt(input, partial: partial, merging: merging)
-        guard instruction.utf8.count <= summaryPromptLimit else { throw summarySizeError }
-        let schema = directory.appendingPathComponent("schema.json")
-        try MeetingSummaryFormat.schema(partial: partial).write(to: schema)
-        let prompt = directory.appendingPathComponent("prompt.txt")
-        let result = directory.appendingPathComponent("summary.json")
-        try? FileManager.default.removeItem(at: result)
-        try Data(instruction.utf8).write(to: prompt)
-        var arguments = [
-            "exec", "--skip-git-repo-check", "--ephemeral", "--ignore-user-config",
-            "--disable", "shell_tool", "--disable", "unified_exec", "--disable", "apps",
-            "--disable", "plugins", "-c", "web_search=\"disabled\"",
-            "--sandbox", "read-only", "--color", "never",
-            "--output-schema", schema.path, "--output-last-message", result.path,
-        ]
-        if !settings.codexModel.isEmpty {
-            arguments += ["--model", settings.codexModel]
-        }
-        arguments += ["--config", "model_reasoning_effort=\"\(settings.codexReasoning)\""]
-        arguments.append("-")
-        try await ProcessRunner.run(
-            settings.codex,
-            arguments: arguments,
-            directory: directory,
-            stdin: prompt
-        )
+        let request = try summaryRequest(input, partial: partial, merging: merging)
+        guard try request.prompt.utf8.count <= summaryPromptLimit
+        else { throw summarySizeError }
+        let data = try await provider.generate(request)
         do {
-            return try JSONDecoder().decode(Result.self, from: Data(contentsOf: result))
+            return try JSONDecoder().decode(Result.self, from: data)
         } catch {
             throw MeetingError(
-                message: "Codex не вернул корректное резюме. Расшифровка доступна для повторной попытки."
+                message: "Провайдер вернул некорректное резюме. Расшифровка доступна для повторной попытки."
             )
         }
     }
