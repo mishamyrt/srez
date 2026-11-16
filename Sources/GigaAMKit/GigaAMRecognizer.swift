@@ -50,14 +50,32 @@ public final class GigaAMRecognizer: @unchecked Sendable {
             throw GigaAMError.fileNotFound(url.path)
         }
 
-        let audio = try AudioLoader.loadMonoFloat32(
-            url: url,
-            targetSampleRate: bundle.manifest.sampleRate
-        )
-
-        return try await transcribe(samples: audio.samples, sampleRate: audio.sampleRate, progress: progress)
+        let sampleRate = bundle.manifest.sampleRate
+        let chunkSize = try Self.chunkSize(duration: configuration.chunkDuration, sampleRate: sampleRate)
+        let reader = try AudioLoader.Reader(url: url, targetSampleRate: sampleRate)
+        var text: [String] = []
+        var words: [GigaAMProWord] = []
+        var offset = 0
+        await progress?(0)
+        while let samples = try reader.nextChunk(size: chunkSize) {
+            try Task.checkCancellation()
+            let transcription = try model.transcribe(samples: samples, sampleRate: sampleRate)
+            if !transcription.text.isEmpty { text.append(transcription.text) }
+            let seconds = TimeInterval(offset) / TimeInterval(sampleRate)
+            words += transcription.words.map {
+                GigaAMProWord(text: $0.text, start: $0.start + seconds, end: $0.end + seconds)
+            }
+            offset += samples.count
+            try Task.checkCancellation()
+            await progress?(min(1, Double(offset) / Double(max(1, reader.estimatedSampleCount))))
+        }
+        guard offset > 0 else {
+            throw GigaAMError.invalidArguments("Audio is empty")
+        }
+        await progress?(1)
+        return GigaAMResult(text: text.joined(separator: " "), segments: [], words: words,
+                           duration: TimeInterval(offset) / TimeInterval(sampleRate))
     }
-
 
 
     public func transcribeTimed(
