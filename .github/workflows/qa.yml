@@ -10,6 +10,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v7
+    - name: Install SwiftLint
+      run: brew install swiftlint
     - name: Build app
       run: make build
     - name: Run tests
