@@ -12,8 +12,8 @@ final class MeetingPipelineTests: XCTestCase {
             return MeetingOutput(transcript: transcript)
         }
         let results = directory.appendingPathComponent("results")
-        let first = try MeetingPipeline.combineTranscripts(outputs, directory: results)
-        let second = try MeetingPipeline.combineTranscripts(outputs, directory: results)
+        let first = try MeetingFileStore.combineTranscripts(outputs, directory: results)
+        let second = try MeetingFileStore.combineTranscripts(outputs, directory: results)
         XCTAssertNil(first.summary)
         XCTAssertNotEqual(first.transcript, second.transcript)
         for output in [first, second] {
@@ -31,7 +31,7 @@ final class MeetingPipelineTests: XCTestCase {
         try " \n ".write(to: blank, atomically: true, encoding: .utf8)
         let results = directory.appendingPathComponent("results")
         for invalid in [blank, directory.appendingPathComponent("missing.raw.txt")] {
-            XCTAssertThrowsError(try MeetingPipeline.combineTranscripts(
+            XCTAssertThrowsError(try MeetingFileStore.combineTranscripts(
                 [MeetingOutput(transcript: valid), MeetingOutput(transcript: invalid)], directory: results
             ))
             XCTAssertFalse(FileManager.default.fileExists(atPath: results.path))
@@ -46,16 +46,16 @@ final class MeetingPipelineTests: XCTestCase {
         try "исходный текст".write(to: transcript, atomically: true, encoding: .utf8)
         let summary = MeetingSummary(title: "../План: релиз/осень", meetingType: .project,
                                      summary: [.init(text: "Готовим релиз.", sourceIDs: ["p1s1"])])
-        let first = try MeetingPipeline.save(summary, transcript: transcript, directory: directory)
+        let first = try MeetingFileStore.save(summary, transcript: transcript, directory: directory)
         XCTAssertEqual(first.summary?.lastPathComponent, "План релиз осень.md")
         XCTAssertEqual(first.transcript, transcript)
         XCTAssertEqual(first.file, first.summary)
-        let second = try MeetingPipeline.save(summary, transcript: transcript, directory: directory)
+        let second = try MeetingFileStore.save(summary, transcript: transcript, directory: directory)
         XCTAssertEqual(second.summary?.lastPathComponent, "План релиз осень (2).md")
         XCTAssertEqual(try String(contentsOf: first.transcript), "исходный текст")
         XCTAssertEqual(try String(contentsOf: XCTUnwrap(first.summary)), summary.markdown + "\n")
-        XCTAssertEqual(MeetingPipeline.fileStem("../\n:/"), "Встреча")
-        XCTAssertLessThanOrEqual(MeetingPipeline.fileStem(String(repeating: "🧑🏽‍💻", count: 100)).utf8.count, 180)
+        XCTAssertEqual(MeetingFileStore.fileStem("../\n:/"), "Встреча")
+        XCTAssertLessThanOrEqual(MeetingFileStore.fileStem(String(repeating: "🧑🏽‍💻", count: 100)).utf8.count, 180)
     }
 
     func testTranscriptionSavesWithoutCodexAndDoesNotOverwrite() async throws {
@@ -302,7 +302,7 @@ final class MeetingPipelineTests: XCTestCase {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         do {
-            try await MeetingPipeline.runProcess(
+            try await ProcessRunner.run(
                 URL(fileURLWithPath: "/bin/sh"),
                 arguments: ["-c", "printf '\\377deliberate-error' >&2; exit 7"], directory: directory
             )
@@ -317,7 +317,7 @@ final class MeetingPipelineTests: XCTestCase {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         do {
-            try await MeetingPipeline.runProcess(URL(fileURLWithPath: "/bin/sh"),
+            try await ProcessRunner.run(URL(fileURLWithPath: "/bin/sh"),
                                                   arguments: ["-c", "echo deliberate-error >&2; exit 7"], directory: directory)
             XCTFail("Expected nonzero exit to fail")
         } catch {
@@ -326,7 +326,7 @@ final class MeetingPipelineTests: XCTestCase {
         }
         let tasks = (0..<2).map { _ in
             Task {
-                try await MeetingPipeline.runProcess(URL(fileURLWithPath: "/bin/sleep"),
+                try await ProcessRunner.run(URL(fileURLWithPath: "/bin/sleep"),
                                                       arguments: ["30"], directory: directory)
             }
         }

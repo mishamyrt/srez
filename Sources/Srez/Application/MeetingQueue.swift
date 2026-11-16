@@ -11,7 +11,7 @@ final class MeetingQueue: ObservableObject {
     private let combine: @Sendable ([MeetingOutput], URL) throws -> MeetingOutput
 
     init(combine: @escaping @Sendable ([MeetingOutput], URL) throws -> MeetingOutput = {
-        try MeetingPipeline.combineTranscripts($0, directory: $1)
+        try MeetingFileStore.combineTranscripts($0, directory: $1)
     }) {
         self.combine = combine
     }

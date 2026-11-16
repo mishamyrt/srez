@@ -15,7 +15,7 @@ final class MeetingQueueTests: XCTestCase {
         let queue = MeetingQueue { outputs, directory in
             XCTAssertFalse(Thread.isMainThread)
             Thread.sleep(forTimeInterval: 0.3)
-            return try MeetingPipeline.combineTranscripts(outputs, directory: directory)
+            return try MeetingFileStore.combineTranscripts(outputs, directory: directory)
         }
         for index in 0..<2 {
             let file = directory.appendingPathComponent("\(index).raw.txt")

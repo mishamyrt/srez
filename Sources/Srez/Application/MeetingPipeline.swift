@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 import GigaAM
 
@@ -14,7 +13,7 @@ enum MeetingPipeline {
         update: @escaping @Sendable (MeetingEvent) async -> Void
     ) async throws -> MeetingOutput {
         let fm = FileManager.default
-        try prepareOutputDirectory(settings.outputDirectory)
+        try MeetingFileStore.prepareOutputDirectory(settings.outputDirectory)
         let work = fm.temporaryDirectory
             .appendingPathComponent("GigaAM-\(UUID().uuidString)")
         try fm.createDirectory(
@@ -35,7 +34,7 @@ enum MeetingPipeline {
             }
             await update(.stage("Преобразование в WAV…"))
             let wav = work.appendingPathComponent("audio.wav")
-            try await runProcess(settings.ffmpeg, arguments: [
+            try await ProcessRunner.run(settings.ffmpeg, arguments: [
                 "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", input.path,
                 "-map", "0:a:0", "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le",
                 wav.path,
@@ -55,36 +54,11 @@ enum MeetingPipeline {
 
         try Task.checkCancellation()
         await update(.stage("Сохранение расшифровки…"))
-        let file = try saveFile(
+        let file = try MeetingFileStore.saveFile(
             text,
             title: input.deletingPathExtension().lastPathComponent,
             extension: "raw.txt",
             directory: settings.outputDirectory
-        )
-        return MeetingOutput(transcript: file)
-    }
-
-    static func combineTranscripts(
-        _ outputs: [MeetingOutput],
-        directory: URL
-    ) throws -> MeetingOutput {
-        let texts = try outputs.map { output in
-            try Task.checkCancellation()
-            let text = try String(contentsOf: output.transcript, encoding: .utf8)
-            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                throw MeetingError(
-                    message: "Расшифровка «\(output.transcript.lastPathComponent)» пуста. Нет текста для суммаризации."
-                )
-            }
-            return text
-        }
-        try Task.checkCancellation()
-        try prepareOutputDirectory(directory)
-        let file = try saveFile(
-            texts.joined(separator: "\n\n"),
-            title: "Общая расшифровка (\(outputs.count))",
-            extension: "raw.txt",
-            directory: directory
         )
         return MeetingOutput(transcript: file)
     }
@@ -99,7 +73,7 @@ enum MeetingPipeline {
                 message: "Не найден Codex CLI. Укажите путь к codex в настройках."
             )
         }
-        try prepareOutputDirectory(settings.outputDirectory)
+        try MeetingFileStore.prepareOutputDirectory(settings.outputDirectory)
         let work = fm.temporaryDirectory
             .appendingPathComponent("GigaAM-\(UUID().uuidString)")
         try fm.createDirectory(
@@ -207,7 +181,7 @@ enum MeetingPipeline {
         }
         try Task.checkCancellation()
         await update(.stage("Сохранение…"))
-        return try save(
+        return try MeetingFileStore.save(
             summary,
             transcript: output.transcript,
             directory: settings.outputDirectory
@@ -304,7 +278,7 @@ enum MeetingPipeline {
         }
         arguments += ["--config", "model_reasoning_effort=\"\(settings.codexReasoning)\""]
         arguments.append("-")
-        try await runProcess(
+        try await ProcessRunner.run(
             settings.codex,
             arguments: arguments,
             directory: directory,
@@ -315,150 +289,6 @@ enum MeetingPipeline {
         } catch {
             throw MeetingError(
                 message: "Codex не вернул корректное резюме. Расшифровка доступна для повторной попытки."
-            )
-        }
-    }
-
-    static func fileStem(_ title: String) -> String {
-        let forbidden = CharacterSet.controlCharacters
-            .union(CharacterSet(charactersIn: "/\\:"))
-        var name = title.components(separatedBy: forbidden).joined(separator: " ")
-            .split(whereSeparator: \.isWhitespace).joined(separator: " ")
-            .trimmingCharacters(in: CharacterSet(charactersIn: ". "))
-        if name.lowercased().hasSuffix(".md") {
-            name.removeLast(3)
-        }
-        while name.utf8.count > 180 {
-            name.removeLast()
-        }
-        name = name.trimmingCharacters(in: CharacterSet(charactersIn: ". "))
-        return name.isEmpty ? "Встреча" : name
-    }
-
-    static func save(
-        _ summary: MeetingSummary, transcript: URL, directory: URL
-    ) throws -> MeetingOutput {
-        let file = try saveFile(
-            summary.markdown + "\n",
-            title: summary.title,
-            extension: "md",
-            directory: directory
-        )
-        return MeetingOutput(transcript: transcript, summary: file)
-    }
-
-    private static func prepareOutputDirectory(_ directory: URL) throws {
-        let fm = FileManager.default
-        try fm.createDirectory(at: directory, withIntermediateDirectories: true)
-        guard fm.isWritableFile(atPath: directory.path) else {
-            throw MeetingError(message: "Нет доступа на запись в папку результатов.")
-        }
-    }
-
-    private static func saveFile(
-        _ text: String,
-        title: String,
-        extension suffix: String,
-        directory: URL
-    ) throws -> URL {
-        let fm = FileManager.default
-        let stem = fileStem(title)
-        var index = 1
-        while true {
-            let name = stem + (index == 1 ? "" : " (\(index))")
-            let file = directory.appendingPathComponent(name + "." + suffix)
-            if fm.fileExists(atPath: file.path) {
-                index += 1
-                continue
-            }
-            // Exclusive creation also prevents overwriting a file created after the check
-            // above.
-            try Data(text.utf8).write(to: file, options: .withoutOverwriting)
-            return file
-        }
-    }
-
-    static func runProcess(
-        _ executable: URL, arguments: [String], directory: URL, stdin: URL? = nil
-    ) async throws {
-        try Task.checkCancellation()
-        let log = directory.appendingPathComponent("process-\(UUID().uuidString).log")
-        FileManager.default.createFile(
-            atPath: log.path,
-            contents: nil,
-            attributes: [.posixPermissions: 0o600]
-        )
-        let stderr = try FileHandle(forWritingTo: log)
-        let input = try stdin.map { try FileHandle(forReadingFrom: $0) }
-        defer {
-            try? stderr.close()
-            try? input?.close()
-            try? FileManager.default.removeItem(at: log)
-        }
-        let process = Process()
-        process.executableURL = executable
-        process.arguments = arguments
-        process.currentDirectoryURL = directory
-        var environment = ProcessInfo.processInfo.environment
-        environment["PATH"] = [
-            executable.deletingLastPathComponent().path,
-            "/opt/homebrew/bin",
-            "/usr/local/bin",
-            "/usr/bin",
-            "/bin",
-            environment["PATH"] ?? "",
-        ]
-        .joined(separator: ":")
-        process.environment = environment
-        process.standardInput = input ?? FileHandle.nullDevice
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = stderr
-        try process.run()
-        do {
-            while process.isRunning {
-                try await Task.sleep(for: .milliseconds(100))
-            }
-            try Task.checkCancellation()
-        } catch {
-            if process.isRunning {
-                process.terminate()
-                // Reap before allowing the next queued job to start, even if SIGTERM is
-                // ignored.
-                await Task.detached {
-                    for _ in 0 ..< 20 {
-                        if !process.isRunning {
-                            break
-                        }
-                        try? await Task.sleep(for: .milliseconds(50))
-                    }
-                    if process.isRunning {
-                        kill(process.processIdentifier, SIGKILL)
-                    }
-                    // isRunning already reflects termination; waitUntilExit can block on
-                    // Foundation's run loop.
-                    while process
-                        .isRunning
-                    {
-                        try? await Task.sleep(for: .milliseconds(50))
-                    }
-                }.value
-            }
-            throw error
-        }
-        guard process.terminationStatus == 0 else {
-            let handle = try FileHandle(forReadingFrom: log)
-            defer { try? handle.close() }
-            let length = try handle.seekToEnd()
-            try handle.seek(toOffset: length > 6000 ? length - 6000 : 0)
-            // Truncation may start inside a UTF-8 sequence; keep the remaining diagnostic
-            // readable.
-            // swiftlint:disable:next optional_data_string_conversion
-            let details = try String(
-                decoding: handle.readToEnd() ?? Data(),
-                as: UTF8.self
-            )
-            throw MeetingError(
-                message: "\(executable.lastPathComponent) завершился с кодом \(process.terminationStatus).\n\(details)"
             )
         }
     }
