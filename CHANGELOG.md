@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [unreleased]
+## [1.0.0](https://github.com/mishamyrt/srez/releases/tag/v1.0.0) - 2026-11-16
 
 ### 🚀 Features
 
