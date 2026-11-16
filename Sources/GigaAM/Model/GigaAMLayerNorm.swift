@@ -12,10 +12,14 @@ public final class GigaAMLayerNorm: @unchecked Sendable {
         self.eps = eps
     }
 
-    public convenience init(store: GigaAMTensorStore, prefix: String, eps: Float = 1e-5) throws {
-        self.init(
-            weight: try store.load("\(prefix).weight"),
-            bias: try store.load("\(prefix).bias"),
+    public convenience init(
+        store: GigaAMTensorStore,
+        prefix: String,
+        eps: Float = 1e-5
+    ) throws {
+        try self.init(
+            weight: store.load("\(prefix).weight"),
+            bias: store.load("\(prefix).bias"),
             eps: eps
         )
     }

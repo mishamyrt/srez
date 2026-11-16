@@ -11,13 +11,14 @@ public final class GigaAMEncoder: @unchecked Sendable {
     private let stack: GigaAMConformerEncoderStack
 
     public init(store: GigaAMTensorStore, layerCount: Int = 16) throws {
-        self.preEncoder = try GigaAMPreEncoder(store: store)
-        self.stack = try GigaAMConformerEncoderStack(store: store, layerCount: layerCount)
+        preEncoder = try GigaAMPreEncoder(store: store)
+        stack = try GigaAMConformerEncoderStack(store: store, layerCount: layerCount)
     }
 
     public func forward(features: MLXArray, length: Int) -> GigaAMEncoderOutput {
         // Python encoder.forward:
-        // audio_signal, length = pre_encode(x=audio_signal.transpose(1, 2), lengths=length)
+        // audio_signal, length = pre_encode(x=audio_signal.transpose(1, 2),
+        // lengths=length)
         // ...
         // return audio_signal.transpose(1, 2), length
         //

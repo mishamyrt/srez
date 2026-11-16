@@ -1,5 +1,5 @@
-import Foundation
 import Accelerate
+import Foundation
 
 public struct MelSpectrogramConfig: Sendable, Codable, Hashable {
     public let sampleRate: Int
@@ -10,7 +10,7 @@ public struct MelSpectrogramConfig: Sendable, Codable, Hashable {
     public let center: Bool
 
     public init(
-        sampleRate: Int = 16_000,
+        sampleRate: Int = 16000,
         nMels: Int = 64,
         nFFT: Int = 320,
         hopLength: Int = 160,
@@ -39,7 +39,8 @@ public final class MelSpectrogramProcessor: @unchecked Sendable {
         assetsDirectory: URL
     ) throws {
         guard !config.center else {
-            throw GigaAMError.notImplemented("MelSpectrogram.center=true is not implemented")
+            throw GigaAMError
+                .notImplemented("MelSpectrogram.center=true is not implemented")
         }
 
         guard config.nFFT == config.winLength else {
@@ -47,10 +48,11 @@ public final class MelSpectrogramProcessor: @unchecked Sendable {
         }
 
         self.config = config
-        self.nFreqs = config.nFFT / 2 + 1
+        nFreqs = config.nFFT / 2 + 1
 
         let windowURL = assetsDirectory.appendingPathComponent("hann_window.f32.bin")
-        let filterbankURL = assetsDirectory.appendingPathComponent("mel_filterbank_mel_freq.f32.bin")
+        let filterbankURL = assetsDirectory
+            .appendingPathComponent("mel_filterbank_mel_freq.f32.bin")
 
         let window = try Self.readFloat32Binary(windowURL)
         let filterbank = try Self.readFloat32Binary(filterbankURL)
@@ -70,7 +72,8 @@ public final class MelSpectrogramProcessor: @unchecked Sendable {
         self.window = window
         self.filterbank = filterbank
 
-        guard let dft = vDSP_DFT_zop_CreateSetup(nil, vDSP_Length(config.nFFT), .FORWARD) else {
+        guard let dft = vDSP_DFT_zop_CreateSetup(nil, vDSP_Length(config.nFFT), .FORWARD)
+        else {
             throw GigaAMError.invalidArguments("Unsupported DFT length: \(config.nFFT)")
         }
         self.dft = dft
@@ -97,13 +100,17 @@ public final class MelSpectrogramProcessor: @unchecked Sendable {
         let imag = real
         var realOut = real
         var imagOut = real
-        for frameIndex in 0..<frameCount {
+        for frameIndex in 0 ..< frameCount {
             let frameOffset = frameIndex * config.hopLength
-            for n in 0..<config.nFFT { real[n] = samples[frameOffset + n] * window[n] }
+            for sampleIndex in 0 ..< config.nFFT {
+                real[sampleIndex] = samples[frameOffset + sampleIndex] *
+                    window[sampleIndex]
+            }
             vDSP_DFT_Execute(dft, real, imag, &realOut, &imagOut)
-            for freqIndex in 0..<nFreqs {
+            for freqIndex in 0 ..< nFreqs {
                 power[freqIndex * frameCount + frameIndex] =
-                    realOut[freqIndex] * realOut[freqIndex] + imagOut[freqIndex] * imagOut[freqIndex]
+                    realOut[freqIndex] * realOut[freqIndex] + imagOut[freqIndex] *
+                    imagOut[freqIndex]
             }
         }
 
@@ -113,15 +120,16 @@ public final class MelSpectrogramProcessor: @unchecked Sendable {
         )
 
         // mel_power = filterbank [mel, freq] @ power [freq, frame]
-        for melIndex in 0..<config.nMels {
+        for melIndex in 0 ..< config.nMels {
             let melOffset = melIndex * nFreqs
             let outputOffset = melIndex * frameCount
 
-            for frameIndex in 0..<frameCount {
+            for frameIndex in 0 ..< frameCount {
                 var value = Float(0)
 
-                for freqIndex in 0..<nFreqs {
-                    value += filterbank[melOffset + freqIndex] * power[freqIndex * frameCount + frameIndex]
+                for freqIndex in 0 ..< nFreqs {
+                    value += filterbank[melOffset + freqIndex] *
+                        power[freqIndex * frameCount + frameIndex]
                 }
 
                 let clamped = min(max(value, 1e-9), 1e9)
@@ -134,7 +142,7 @@ public final class MelSpectrogramProcessor: @unchecked Sendable {
             count: config.nMels
         )
 
-        for melIndex in 0..<config.nMels {
+        for melIndex in 0 ..< config.nMels {
             let offset = melIndex * frameCount
 
             result[melIndex].withUnsafeMutableBufferPointer { destination in
@@ -150,18 +158,23 @@ public final class MelSpectrogramProcessor: @unchecked Sendable {
         return result
     }
 
-    public func computeFlat(samples: [Float]) throws -> (features: [Float], shape: [Int], length: Int) {
+    public func computeFlat(samples: [Float]) throws
+        -> (features: [Float], shape: [Int], length: Int)
+    {
         let matrix = try compute(samples: samples)
         let frameCount = matrix.first?.count ?? 0
 
         return (
-            features: matrix.flatMap { $0 },
+            features: matrix.flatMap(\.self),
             shape: [1, config.nMels, frameCount],
             length: frameCount
         )
     }
 
-    private static func outputLength(sampleCount: Int, config: MelSpectrogramConfig) -> Int {
+    private static func outputLength(
+        sampleCount: Int,
+        config: MelSpectrogramConfig
+    ) -> Int {
         if config.center {
             return sampleCount / config.hopLength + 1
         }
@@ -176,7 +189,7 @@ public final class MelSpectrogramProcessor: @unchecked Sendable {
 
         let data = try Data(contentsOf: url)
 
-        guard data.count % MemoryLayout<Float>.size == 0 else {
+        guard data.count.isMultiple(of: MemoryLayout<Float>.size) else {
             throw GigaAMError.invalidArguments(
                 "Float32 binary size is not divisible by 4: \(url.path)"
             )
@@ -206,7 +219,10 @@ public enum MelSpectrogram {
         return try processor.compute(samples: samples)
     }
 
-    public static func outputLength(sampleCount: Int, config: MelSpectrogramConfig = MelSpectrogramConfig()) -> Int {
+    public static func outputLength(
+        sampleCount: Int,
+        config: MelSpectrogramConfig = MelSpectrogramConfig()
+    ) -> Int {
         if config.center {
             return sampleCount / config.hopLength + 1
         }

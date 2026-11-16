@@ -27,43 +27,43 @@ public final class GigaAMConformerLayer: @unchecked Sendable {
 
         let prefix = "model.encoder.layers.\(layerIndex)"
 
-        self.normFeedForward1 = try GigaAMLayerNorm(
+        normFeedForward1 = try GigaAMLayerNorm(
             store: store,
             prefix: "\(prefix).norm_feed_forward1"
         )
-        self.feedForward1 = try GigaAMConformerFeedForward(
+        feedForward1 = try GigaAMConformerFeedForward(
             store: store,
             prefix: "\(prefix).feed_forward1"
         )
 
-        self.normSelfAttention = try GigaAMLayerNorm(
+        normSelfAttention = try GigaAMLayerNorm(
             store: store,
             prefix: "\(prefix).norm_self_att"
         )
-        self.selfAttention = try GigaAMRotarySelfAttention(
+        selfAttention = try GigaAMRotarySelfAttention(
             store: store,
             prefix: "\(prefix).self_attn"
         )
 
-        self.normConv = try GigaAMLayerNorm(
+        normConv = try GigaAMLayerNorm(
             store: store,
             prefix: "\(prefix).norm_conv"
         )
-        self.conv = try GigaAMConformerConvolution(
+        conv = try GigaAMConformerConvolution(
             store: store,
             prefix: "\(prefix).conv"
         )
 
-        self.normFeedForward2 = try GigaAMLayerNorm(
+        normFeedForward2 = try GigaAMLayerNorm(
             store: store,
             prefix: "\(prefix).norm_feed_forward2"
         )
-        self.feedForward2 = try GigaAMConformerFeedForward(
+        feedForward2 = try GigaAMConformerFeedForward(
             store: store,
             prefix: "\(prefix).feed_forward2"
         )
 
-        self.normOut = try GigaAMLayerNorm(
+        normOut = try GigaAMLayerNorm(
             store: store,
             prefix: "\(prefix).norm_out"
         )
@@ -74,19 +74,20 @@ public final class GigaAMConformerLayer: @unchecked Sendable {
 
         var x = normFeedForward1.forward(residual)
         x = feedForward1.forward(x)
-        residual = residual + x * fcFactor
+        // MLX += mutates aliases of input; keep residual additions out of place.
+        residual = add(residual, x * fcFactor)
 
         x = normSelfAttention.forward(residual)
         x = selfAttention.forward(x)
-        residual = residual + x
+        residual = add(residual, x)
 
         x = normConv.forward(residual)
         x = conv.forward(x)
-        residual = residual + x
+        residual = add(residual, x)
 
         x = normFeedForward2.forward(residual)
         x = feedForward2.forward(x)
-        residual = residual + x * fcFactor
+        residual = add(residual, x * fcFactor)
 
         x = normOut.forward(residual)
         eval(x)

@@ -3,11 +3,11 @@ import Foundation
 
 public struct GigaAMRNNTDecoderState {
     public let h: MLXArray
-    public let c: MLXArray
+    public let cell: MLXArray
 
-    public init(h: MLXArray, c: MLXArray) {
+    public init(h: MLXArray, cell: MLXArray) {
         self.h = h
-        self.c = c
+        self.cell = cell
     }
 }
 
@@ -39,11 +39,11 @@ public final class GigaAMRNNTDecoder: @unchecked Sendable {
         self.blankId = blankId
         self.hiddenSize = hiddenSize
 
-        self.embedWeight = try store.load("model.head.decoder.embed.weight")
-        self.wIH = try store.load("model.head.decoder.lstm.weight_ih_l0")
-        self.wHH = try store.load("model.head.decoder.lstm.weight_hh_l0")
-        self.bIH = try store.load("model.head.decoder.lstm.bias_ih_l0")
-        self.bHH = try store.load("model.head.decoder.lstm.bias_hh_l0")
+        embedWeight = try store.load("model.head.decoder.embed.weight")
+        wIH = try store.load("model.head.decoder.lstm.weight_ih_l0")
+        wHH = try store.load("model.head.decoder.lstm.weight_hh_l0")
+        bIH = try store.load("model.head.decoder.lstm.bias_ih_l0")
+        bHH = try store.load("model.head.decoder.lstm.bias_hh_l0")
     }
 
     public func zeroState(batchSize: Int = 1) -> GigaAMRNNTDecoderState {
@@ -51,7 +51,7 @@ public final class GigaAMRNNTDecoder: @unchecked Sendable {
 
         return GigaAMRNNTDecoderState(
             h: MLXArray.zeros(shape, dtype: .float32),
-            c: MLXArray.zeros(shape, dtype: .float32)
+            cell: MLXArray.zeros(shape, dtype: .float32)
         )
     }
 
@@ -92,18 +92,18 @@ public final class GigaAMRNNTDecoder: @unchecked Sendable {
 
         let i = sigmoid(iGate)
         let f = sigmoid(fGate)
-        let g = tanh(gGate)
-        let o = sigmoid(oGate)
+        let candidate = tanh(gGate)
+        let output = sigmoid(oGate)
 
-        let c1 = f * currentState.c + i * g
-        let h1 = o * tanh(c1)
+        let c1 = f * currentState.cell + i * candidate
+        let h1 = output * tanh(c1)
 
         eval(h1)
         eval(c1)
 
         return GigaAMRNNTDecoderOutput(
             dec: h1,
-            state: GigaAMRNNTDecoderState(h: h1, c: c1)
+            state: GigaAMRNNTDecoderState(h: h1, cell: c1)
         )
     }
 }

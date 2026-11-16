@@ -1,7 +1,9 @@
 import Foundation
 
 enum MeetingType: String, Codable, CaseIterable, Sendable {
-    case project, oneOnOne = "one_on_one", sales, interview, userResearch = "user_research", retro, general
+    case project, oneOnOne = "one_on_one", sales, interview,
+         userResearch = "user_research",
+         retro, general
 
     var title: String {
         switch self {
@@ -19,9 +21,26 @@ enum MeetingType: String, Codable, CaseIterable, Sendable {
         switch self {
         case .project: [.status, .change, .blocker, .dependency]
         case .oneOnOne: [.change, .concern, .feedback, .agreement, .nextMeeting]
-        case .sales: [.need, .pain, .requirement, .objection, .budget, .timeline, .competitor, .promise]
+        case .sales: [
+                .need,
+                .pain,
+                .requirement,
+                .objection,
+                .budget,
+                .timeline,
+                .competitor,
+                .promise,
+            ]
         case .interview: [.question, .answer, .clarification, .evidence]
-        case .userResearch: [.problem, .workflow, .motivation, .quote, .featureRequest, .workaround, .recurringTheme]
+        case .userResearch: [
+                .problem,
+                .workflow,
+                .motivation,
+                .quote,
+                .featureRequest,
+                .workaround,
+                .recurringTheme,
+            ]
         case .retro: [.worked, .didNotWork, .cause, .start, .stop, .continue, .experiment]
         case .general: [.fact, .position, .argument, .disagreement]
         }
@@ -48,10 +67,14 @@ struct MeetingDetail: Codable, Sendable {
         case status = "Статус", change = "Изменение", blocker = "Блокер", dependency = "Зависимость"
         case concern = "Проблема / опасение", feedback = "Обратная связь", agreement = "Договорённость"
         case nextMeeting = "Тема следующего 1:1"
-        case need = "Потребность", pain = "Боль", requirement = "Требование", objection = "Возражение"
-        case budget = "Бюджет", timeline = "Сроки клиента", competitor = "Конкурент", promise = "Обещание"
-        case question = "Вопрос", answer = "Ответ", clarification = "Уточнение", evidence = "Факт / пример"
-        case problem = "Проблема пользователя", workflow = "Текущий процесс", motivation = "Мотивация"
+        case need = "Потребность", pain = "Боль", requirement = "Требование",
+             objection = "Возражение"
+        case budget = "Бюджет", timeline = "Сроки клиента", competitor = "Конкурент",
+             promise = "Обещание"
+        case question = "Вопрос", answer = "Ответ", clarification = "Уточнение",
+             evidence = "Факт / пример"
+        case problem = "Проблема пользователя", workflow = "Текущий процесс",
+             motivation = "Мотивация"
         case quote = "Цитата", featureRequest = "Пожелание", workaround = "Обходное решение"
         case recurringTheme = "Повторяющаяся тема"
         case worked = "Что сработало", didNotWork = "Что не сработало", cause = "Причина"
@@ -60,7 +83,7 @@ struct MeetingDetail: Codable, Sendable {
 
     var kind: Kind
     var text: String
-    var speaker: String? = nil
+    var speaker: String?
     var sourceIDs: [String]
 
     enum CodingKeys: String, CodingKey {
@@ -77,7 +100,7 @@ struct MeetingTopic: Codable, Sendable {
 struct MeetingDecision: Codable, Sendable {
     var text: String
     var conditions: [String] = []
-    var rationale: String? = nil
+    var rationale: String?
     var sourceIDs: [String]
 
     enum CodingKeys: String, CodingKey {
@@ -87,8 +110,8 @@ struct MeetingDecision: Codable, Sendable {
 
 struct MeetingAction: Codable, Sendable {
     var text: String
-    var owner: String? = nil
-    var due: String? = nil
+    var owner: String?
+    var due: String?
     var dependencies: [String] = []
     var sourceIDs: [String]
 
@@ -99,8 +122,8 @@ struct MeetingAction: Codable, Sendable {
 
 struct MeetingQuestion: Codable, Sendable {
     var text: String
-    var needed: String? = nil
-    var owner: String? = nil
+    var needed: String?
+    var owner: String?
     var sourceIDs: [String]
 
     enum CodingKeys: String, CodingKey {
@@ -108,7 +131,8 @@ struct MeetingQuestion: Codable, Sendable {
     }
 }
 
-// Partial results keep facts of every meeting type, without choosing a template or writing an overview.
+/// Partial results keep facts of every meeting type, without choosing a template or
+/// writing an overview.
 struct MeetingNotes: Codable, Sendable {
     var topics: [MeetingTopic] = []
     var decisions: [MeetingDecision] = []
@@ -121,50 +145,68 @@ struct MeetingNotes: Codable, Sendable {
 
     var sourceIDs: Set<String> {
         Set(topics.flatMap { $0.details.flatMap(\.sourceIDs) }
-            + decisions.flatMap(\.sourceIDs) + actions.flatMap(\.sourceIDs) + openQuestions.flatMap(\.sourceIDs))
+            + decisions.flatMap(\.sourceIDs) + actions
+            .flatMap(\.sourceIDs) + openQuestions.flatMap(\.sourceIDs))
     }
 
     func validate(sources: [TranscriptSource]) throws {
         let validIDs = Set(sources.map(\.id))
         func check(_ text: String, _ ids: [String]) throws {
             guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                  !ids.isEmpty, Set(ids).isSubset(of: validIDs) else {
-                throw MeetingError(message: "Codex вернул сведения без корректного источника. Повторите суммаризацию.")
+                  !ids.isEmpty, Set(ids).isSubset(of: validIDs)
+            else {
+                throw MeetingError(
+                    message: "Codex вернул сведения без корректного источника. Повторите суммаризацию."
+                )
             }
         }
         func checkFields(_ values: [String]) throws {
-            guard values.allSatisfy({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else {
-                throw MeetingError(message: "Codex вернул пустое поле протокола. Повторите суммаризацию.")
+            guard values
+                .allSatisfy({
+                    !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                })
+            else {
+                throw MeetingError(
+                    message: "Codex вернул пустое поле протокола. Повторите суммаризацию."
+                )
             }
         }
         for topic in topics {
             try checkFields([topic.title])
             guard !topic.details.isEmpty else {
-                throw MeetingError(message: "Codex вернул пустую тему. Повторите суммаризацию.")
+                throw MeetingError(
+                    message: "Codex вернул пустую тему. Повторите суммаризацию."
+                )
             }
             for detail in topic.details {
                 try check(detail.text, detail.sourceIDs)
-                try checkFields([detail.speaker].compactMap { $0 })
+                try checkFields([detail.speaker].compactMap(\.self))
                 if detail.kind == .quote {
                     let ids = Set(detail.sourceIDs)
-                    let runs = sources.split(whereSeparator: { !ids.contains($0.id) })
-                    guard runs.contains(where: { $0.map(\.text).joined().contains(detail.text) }) else {
-                        throw MeetingError(message: "Цитата Codex не совпала с расшифровкой. Повторите суммаризацию.")
+                    let runs = sources.split { !ids.contains($0.id) }
+                    guard runs
+                        .contains(where: { $0.map(\.text).joined().contains(detail.text)
+                        })
+                    else {
+                        throw MeetingError(
+                            message: "Цитата Codex не совпала с расшифровкой. Повторите суммаризацию."
+                        )
                     }
                 }
             }
         }
         for decision in decisions {
             try check(decision.text, decision.sourceIDs)
-            try checkFields(decision.conditions + [decision.rationale].compactMap { $0 })
+            try checkFields(decision.conditions + [decision.rationale].compactMap(\.self))
         }
         for action in actions {
             try check(action.text, action.sourceIDs)
-            try checkFields(action.dependencies + [action.owner, action.due].compactMap { $0 })
+            try checkFields(action.dependencies + [action.owner, action.due]
+                .compactMap(\.self))
         }
         for question in openQuestions {
             try check(question.text, question.sourceIDs)
-            try checkFields([question.needed, question.owner].compactMap { $0 })
+            try checkFields([question.needed, question.owner].compactMap(\.self))
         }
     }
 }
@@ -188,20 +230,32 @@ struct MeetingSummary: Codable, Sendable {
     }
 
     private var notes: MeetingNotes {
-        MeetingNotes(topics: topics, decisions: decisions, actions: actions, openQuestions: openQuestions)
+        MeetingNotes(
+            topics: topics,
+            decisions: decisions,
+            actions: actions,
+            openQuestions: openQuestions
+        )
     }
 
     func validate(sources: [TranscriptSource]) throws {
         guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              !summary.isEmpty || !notes.sourceIDs.isEmpty else {
-            throw MeetingError(message: "Codex вернул пустое резюме. Повторите суммаризацию.")
+              !summary.isEmpty || !notes.sourceIDs.isEmpty
+        else {
+            throw MeetingError(
+                message: "Codex вернул пустое резюме. Повторите суммаризацию."
+            )
         }
         try notes.validate(sources: sources)
         // Use the same evidence checks for the overview as for discussion details.
         if !summary.isEmpty {
-            try MeetingNotes(topics: [.init(title: title, kind: .general, details: summary.map {
-                .init(kind: .fact, text: $0.text, sourceIDs: $0.sourceIDs)
-            })]).validate(sources: sources)
+            try MeetingNotes(topics: [.init(
+                title: title,
+                kind: .general,
+                details: summary.map {
+                    .init(kind: .fact, text: $0.text, sourceIDs: $0.sourceIDs)
+                }
+            )]).validate(sources: sources)
         }
     }
 
@@ -215,17 +269,23 @@ struct MeetingSummary: Codable, Sendable {
         }
         var sections = ["# \(inline(title))"]
         func append(_ title: String, _ items: [String]) {
-            if !items.isEmpty { sections.append("## \(title)\n\n" + items.joined(separator: "\n\n")) }
+            if !items
+                .isEmpty
+            {
+                sections.append("## \(title)\n\n" + items.joined(separator: "\n\n"))
+            }
         }
         append("Краткое резюме", summary.map { inline($0.text) })
         append("Обсуждавшиеся вопросы", topics.map { topic in
             let order = topic.kind.detailKinds
-            // Keep Q&A groups together; sorting all questions before all answers loses their relationship.
-            let ordered = topic.kind == .interview ? topic.details : topic.details.enumerated().sorted {
-                let left = order.firstIndex(of: $0.element.kind) ?? order.count
-                let right = order.firstIndex(of: $1.element.kind) ?? order.count
-                return left == right ? $0.offset < $1.offset : left < right
-            }.map(\.element)
+            // Keep Q&A groups together; sorting all questions before all answers loses
+            // their relationship.
+            let ordered = topic.kind == .interview ? topic.details : topic.details
+                .enumerated().sorted {
+                    let left = order.firstIndex(of: $0.element.kind) ?? order.count
+                    let right = order.firstIndex(of: $1.element.kind) ?? order.count
+                    return left == right ? $0.offset < $1.offset : left < right
+                }.map(\.element)
             let details = ordered.map { detail in
                 let speaker = detail.speaker.map { " (\(inline($0)))" } ?? ""
                 let text = inline(detail.text)
@@ -238,7 +298,11 @@ struct MeetingSummary: Codable, Sendable {
             if !decision.conditions.isEmpty {
                 item += "\n  **Условия:** \(decision.conditions.map(inline).joined(separator: "; "))"
             }
-            if let rationale = decision.rationale { item += "\n  **Обоснование:** \(inline(rationale))" }
+            if let rationale = decision
+                .rationale
+            {
+                item += "\n  **Обоснование:** \(inline(rationale))"
+            }
             return item
         })
         append("Задачи", actions.map { action in
@@ -251,8 +315,16 @@ struct MeetingSummary: Codable, Sendable {
         })
         append("Открытые вопросы", openQuestions.map { question in
             var item = "- \(inline(question.text))"
-            if let needed = question.needed { item += "\n  **Нужно выяснить:** \(inline(needed))" }
-            if let owner = question.owner { item += "\n  **Ответственный:** \(inline(owner))" }
+            if let needed = question
+                .needed
+            {
+                item += "\n  **Нужно выяснить:** \(inline(needed))"
+            }
+            if let owner = question
+                .owner
+            {
+                item += "\n  **Ответственный:** \(inline(owner))"
+            }
             return item
         })
         return sections.joined(separator: "\n\n")
@@ -262,41 +334,67 @@ struct MeetingSummary: Codable, Sendable {
 enum MeetingSummaryFormat {
     static func schema(partial: Bool) throws -> Data {
         func object(_ properties: [String: Any]) -> [String: Any] {
-            ["type": "object", "properties": properties, "required": properties.keys.sorted(), "additionalProperties": false]
+            [
+                "type": "object",
+                "properties": properties,
+                "required": properties.keys.sorted(),
+                "additionalProperties": false,
+            ]
         }
-        func array(_ items: [String: Any]) -> [String: Any] { ["type": "array", "items": items] }
+        func array(_ items: [String: Any]) -> [String: Any] {
+            [
+                "type": "array",
+                "items": items,
+            ]
+        }
         let string: [String: Any] = ["type": "string"]
         let nullableString: [String: Any] = ["type": ["string", "null"]]
         let strings = array(string)
-        let type: [String: Any] = ["type": "string", "enum": MeetingType.allCases.map(\.rawValue)]
+        let type: [String: Any] = [
+            "type": "string",
+            "enum": MeetingType.allCases.map(\.rawValue),
+        ]
         let detail = object([
-            "kind": ["type": "string", "enum": MeetingDetail.Kind.allCases.map(\.rawValue)],
-            "text": string, "speaker": nullableString, "source_ids": strings
+            "kind": [
+                "type": "string",
+                "enum": MeetingDetail.Kind.allCases.map(\.rawValue),
+            ],
+            "text": string, "speaker": nullableString, "source_ids": strings,
         ])
         var properties: [String: Any] = [
-            "topics": array(object(["title": string, "kind": type, "details": array(detail)])),
+            "topics": array(object([
+                "title": string,
+                "kind": type,
+                "details": array(detail),
+            ])),
             "decisions": array(object([
-                "text": string, "conditions": strings, "rationale": nullableString, "source_ids": strings
+                "text": string, "conditions": strings, "rationale": nullableString,
+                "source_ids": strings,
             ])),
             "actions": array(object([
                 "text": string, "owner": nullableString, "due": nullableString,
-                "dependencies": strings, "source_ids": strings
+                "dependencies": strings, "source_ids": strings,
             ])),
             "open_questions": array(object([
-                "text": string, "needed": nullableString, "owner": nullableString, "source_ids": strings
-            ]))
+                "text": string, "needed": nullableString, "owner": nullableString,
+                "source_ids": strings,
+            ])),
         ]
         if !partial {
             properties["title"] = string
             properties["meeting_type"] = type
             properties["summary"] = array(object(["text": string, "source_ids": strings]))
         }
-        return try JSONSerialization.data(withJSONObject: object(properties), options: [.sortedKeys])
+        return try JSONSerialization.data(
+            withJSONObject: object(properties),
+            options: [.sortedKeys]
+        )
     }
 
     static func prompt(data: String, partial: Bool, merging: Bool = false) -> String {
         let profiles = MeetingType.allCases.map { type in
-            "\(type.rawValue) (\(type.title)): " + type.detailKinds.map(\.rawValue).joined(separator: " → ")
+            "\(type.rawValue) (\(type.title)): " + type.detailKinds.map(\.rawValue)
+                .joined(separator: " → ")
         }.joined(separator: "\n")
         return """
         Ты составляешь протокол встречи на русском языке из распознанной речи.

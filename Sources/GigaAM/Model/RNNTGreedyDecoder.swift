@@ -102,7 +102,7 @@ public final class RNNTGreedyDecoder: @unchecked Sendable {
         var readbackSec = TimeInterval(0)
         var totalStepSec = TimeInterval(0)
 
-        for timeIndex in 0..<effectiveLength {
+        for timeIndex in 0 ..< effectiveLength {
             let encoderFrame = encodedBTC[
                 0 ..< 1,
                 timeIndex ..< timeIndex + 1,
@@ -112,7 +112,7 @@ public final class RNNTGreedyDecoder: @unchecked Sendable {
             var notBlank = true
             var newSymbols = 0
 
-            while notBlank && newSymbols < config.maxSymbolsPerFrame {
+            while notBlank, newSymbols < config.maxSymbolsPerFrame {
                 let stepStart = Self.now()
 
                 let decoderResult: GigaAMRNNTDecoderOutput
@@ -139,8 +139,11 @@ public final class RNNTGreedyDecoder: @unchecked Sendable {
                 let readbackStart = Self.now()
                 let flat = logProbs.asType(Float.self).asArray(Float.self)
 
-                guard let best = flat.enumerated().max(by: { lhs, rhs in lhs.element < rhs.element }) else {
-                    throw GigaAMError.invalidManifest("RNNT step produced empty log_probs")
+                guard let best = flat.enumerated()
+                    .max(by: { lhs, rhs in lhs.element < rhs.element })
+                else {
+                    throw GigaAMError
+                        .invalidManifest("RNNT step produced empty log_probs")
                 }
 
                 readbackSec += Self.now() - readbackStart

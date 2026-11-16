@@ -29,14 +29,14 @@ public final class GigaAMRNNTJoint: @unchecked Sendable {
         self.jointHidden = jointHidden
         self.numClasses = numClasses
 
-        self.encWeight = try store.load("model.head.joint.enc.weight")
-        self.encBias = try store.load("model.head.joint.enc.bias")
+        encWeight = try store.load("model.head.joint.enc.weight")
+        encBias = try store.load("model.head.joint.enc.bias")
 
-        self.predWeight = try store.load("model.head.joint.pred.weight")
-        self.predBias = try store.load("model.head.joint.pred.bias")
+        predWeight = try store.load("model.head.joint.pred.weight")
+        predBias = try store.load("model.head.joint.pred.bias")
 
-        self.outWeight = try store.load("model.head.joint.joint_net.1.weight")
-        self.outBias = try store.load("model.head.joint.joint_net.1.bias")
+        outWeight = try store.load("model.head.joint.joint_net.1.weight")
+        outBias = try store.load("model.head.joint.joint_net.1.bias")
     }
 
     public func forward(

@@ -10,7 +10,11 @@ public final class GigaAMLinear: @unchecked Sendable {
         self.bias = bias
     }
 
-    public convenience init(store: GigaAMTensorStore, weightName: String, biasName: String? = nil) throws {
+    public convenience init(
+        store: GigaAMTensorStore,
+        weightName: String,
+        biasName: String? = nil
+    ) throws {
         let weight = try store.load(weightName)
         let bias = try biasName.map { try store.load($0) }
         self.init(weight: weight, bias: bias)
@@ -20,7 +24,7 @@ public final class GigaAMLinear: @unchecked Sendable {
         var y = matmul(x, transposed(weight))
 
         if let bias {
-            y = y + bias
+            y = add(y, bias)
         }
 
         return y

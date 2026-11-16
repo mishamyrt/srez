@@ -24,7 +24,7 @@ public struct SafetensorsIndex: Sendable {
         tensors.reduce(0) { $0 + $1.parameterCount }
     }
 
-    public static func loadHeader(url: URL) throws -> SafetensorsIndex {
+    public static func loadHeader(url: URL) throws -> Self {
         let handle = try FileHandle(forReadingFrom: url)
         defer {
             try? handle.close()
@@ -33,14 +33,15 @@ public struct SafetensorsIndex: Sendable {
         let lengthData = try handle.read(upToCount: 8) ?? Data()
 
         guard lengthData.count == 8 else {
-            throw GigaAMError.invalidManifest("Invalid safetensors file: cannot read header length")
+            throw GigaAMError
+                .invalidManifest("Invalid safetensors file: cannot read header length")
         }
 
         let headerLength = lengthData.withUnsafeBytes { rawBuffer -> UInt64 in
             let bytes = rawBuffer.bindMemory(to: UInt8.self)
             var value: UInt64 = 0
 
-            for i in 0..<8 {
+            for i in 0 ..< 8 {
                 value |= UInt64(bytes[i]) << UInt64(8 * i)
             }
 
@@ -52,13 +53,15 @@ public struct SafetensorsIndex: Sendable {
         }
 
         guard headerLength < 1024 * 1024 * 128 else {
-            throw GigaAMError.invalidManifest("Invalid safetensors file: header too large")
+            throw GigaAMError
+                .invalidManifest("Invalid safetensors file: header too large")
         }
 
         let headerData = try handle.read(upToCount: Int(headerLength)) ?? Data()
 
         guard headerData.count == Int(headerLength) else {
-            throw GigaAMError.invalidManifest("Invalid safetensors file: cannot read full header")
+            throw GigaAMError
+                .invalidManifest("Invalid safetensors file: cannot read full header")
         }
 
         let object = try JSONSerialization.jsonObject(with: headerData, options: [])
@@ -74,19 +77,12 @@ public struct SafetensorsIndex: Sendable {
                 continue
             }
 
-            guard let item = value as? [String: Any] else {
-                continue
-            }
-
-            guard let dtype = item["dtype"] as? String else {
-                continue
-            }
-
-            guard let shapeAny = item["shape"] as? [Any] else {
-                continue
-            }
-
-            guard let offsetsAny = item["data_offsets"] as? [Any] else {
+            guard let item = value as? [String: Any], let dtype = item[
+                "dtype"
+            ] as? String,
+                let shapeAny = item["shape"] as? [Any],
+                let offsetsAny = item["data_offsets"] as? [Any]
+            else {
                 continue
             }
 
@@ -122,7 +118,7 @@ public struct SafetensorsIndex: Sendable {
 
         tensors.sort { $0.name < $1.name }
 
-        return SafetensorsIndex(
+        return Self(
             path: url.path,
             dataStartOffset: 8 + headerLength,
             tensors: tensors

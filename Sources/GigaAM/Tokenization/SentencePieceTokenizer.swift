@@ -29,7 +29,8 @@ public final class SentencePieceTokenizer: @unchecked Sendable {
 
     public init(modelURL: URL?) throws {
         guard let modelURL else {
-            throw GigaAMError.invalidArguments("SentencePieceTokenizer requires tokenizer.model URL")
+            throw GigaAMError
+                .invalidArguments("SentencePieceTokenizer requires tokenizer.model URL")
         }
 
         let vocabURL = modelURL
@@ -45,18 +46,20 @@ public final class SentencePieceTokenizer: @unchecked Sendable {
         let data = try Data(contentsOf: vocabURL)
         let vocab = try JSONDecoder().decode(VocabularyFile.self, from: data)
 
-        self.pieces = vocab.pieces
-        self.unkId = vocab.unkId
-        self.bosId = vocab.bosId
-        self.eosId = vocab.eosId
-        self.padId = vocab.padId
+        pieces = vocab.pieces
+        unkId = vocab.unkId
+        bosId = vocab.bosId
+        eosId = vocab.eosId
+        padId = vocab.padId
     }
 
     /// Raw sentencepiece piece for a token id. Nil for control tokens (bos/eos/pad)
     /// and out-of-range ids. `<unk>` is returned as-is.
     public func piece(forTokenId tokenId: Int) -> String? {
-        guard tokenId >= 0 && tokenId < pieces.count else { return nil }
-        if tokenId == bosId || tokenId == eosId || tokenId == padId { return nil }
+        guard tokenId >= 0, tokenId < pieces.count else { return nil }
+        if tokenId == bosId || tokenId == eosId || tokenId == padId {
+            return nil
+        }
         return pieces[tokenId]
     }
 
@@ -64,7 +67,7 @@ public final class SentencePieceTokenizer: @unchecked Sendable {
         var text = ""
 
         for tokenId in tokenIds {
-            guard tokenId >= 0 && tokenId < pieces.count else {
+            guard tokenId >= 0, tokenId < pieces.count else {
                 throw GigaAMError.invalidArguments(
                     "Token id out of vocabulary range: \(tokenId), vocab size: \(pieces.count)"
                 )

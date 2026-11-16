@@ -9,7 +9,7 @@ public final class GigaAMTensorStore: @unchecked Sendable {
 
     public init(weightsURL: URL) throws {
         self.weightsURL = weightsURL
-        self.index = try SafetensorsIndex.loadHeader(url: weightsURL)
+        index = try SafetensorsIndex.loadHeader(url: weightsURL)
     }
 
     public var tensorCount: Int {

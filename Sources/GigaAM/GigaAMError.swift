@@ -12,21 +12,21 @@ public enum GigaAMError: Error, LocalizedError, Sendable {
 
     public var errorDescription: String? {
         switch self {
-        case .fileNotFound(let path):
+        case let .fileNotFound(path):
             return "File not found: \(path)"
-        case .modelDirectoryNotFound(let path):
+        case let .modelDirectoryNotFound(path):
             return "Model directory not found: \(path)"
-        case .manifestNotFound(let path):
+        case let .manifestNotFound(path):
             return "Model manifest not found: \(path)"
-        case .weightsNotFound(let path):
+        case let .weightsNotFound(path):
             return "Model weights not found: \(path)"
-        case .tokenizerNotFound(let path):
+        case let .tokenizerNotFound(path):
             return "Tokenizer not found: \(path)"
-        case .invalidManifest(let message):
+        case let .invalidManifest(message):
             return "Invalid manifest: \(message)"
-        case .invalidArguments(let message):
+        case let .invalidArguments(message):
             return "Invalid arguments: \(message)"
-        case .notImplemented(let message):
+        case let .notImplemented(message):
             return "Not implemented yet: \(message)"
         }
     }

@@ -21,28 +21,28 @@ public final class GigaAMRotarySelfAttention: @unchecked Sendable {
     ) throws {
         self.nHeads = nHeads
         self.modelDim = modelDim
-        self.headDim = modelDim / nHeads
+        headDim = modelDim / nHeads
         self.ropeBase = ropeBase
 
-        self.linearQ = try GigaAMLinear(
+        linearQ = try GigaAMLinear(
             store: store,
             weightName: "\(prefix).linear_q.weight",
             biasName: "\(prefix).linear_q.bias"
         )
 
-        self.linearK = try GigaAMLinear(
+        linearK = try GigaAMLinear(
             store: store,
             weightName: "\(prefix).linear_k.weight",
             biasName: "\(prefix).linear_k.bias"
         )
 
-        self.linearV = try GigaAMLinear(
+        linearV = try GigaAMLinear(
             store: store,
             weightName: "\(prefix).linear_v.weight",
             biasName: "\(prefix).linear_v.bias"
         )
 
-        self.linearOut = try GigaAMLinear(
+        linearOut = try GigaAMLinear(
             store: store,
             weightName: "\(prefix).linear_out.weight",
             biasName: "\(prefix).linear_out.bias"
@@ -100,18 +100,18 @@ public final class GigaAMRotarySelfAttention: @unchecked Sendable {
             .reshaped([batchSize, timeSteps, nHeads, headDim])
             .transposed(0, 2, 1, 3)
 
-        let k = linearK.forward(keyFlat)
+        let keys = linearK.forward(keyFlat)
             .reshaped([batchSize, timeSteps, nHeads, headDim])
             .transposed(0, 2, 1, 3)
 
-        let v = linearV.forward(valueFlat)
+        let values = linearV.forward(valueFlat)
             .reshaped([batchSize, timeSteps, nHeads, headDim])
             .transposed(0, 2, 1, 3)
 
         let scale = Float(1.0 / Foundation.sqrt(Double(headDim)))
-        let scores = matmul(q, transposed(k, 0, 1, 3, 2) * scale)
+        let scores = matmul(q, transposed(keys, 0, 1, 3, 2) * scale)
         let attn = softmax(scores, axis: -1)
-        let context = matmul(attn, v)
+        let context = matmul(attn, values)
 
         let contextFlat = context
             .transposed(0, 2, 1, 3)
@@ -129,8 +129,8 @@ public final class GigaAMRotarySelfAttention: @unchecked Sendable {
         cosValues.reserveCapacity(length * headDim)
         sinValues.reserveCapacity(length * headDim)
 
-        for position in 0..<length {
-            for dimIndex in 0..<headDim {
+        for position in 0 ..< length {
+            for dimIndex in 0 ..< headDim {
                 let freqIndex = dimIndex < halfDim ? dimIndex : dimIndex - halfDim
                 let exponent = Double(2 * freqIndex) / Double(headDim)
                 let invFreq = 1.0 / Foundation.pow(Double(ropeBase), exponent)
@@ -152,7 +152,12 @@ public final class GigaAMRotarySelfAttention: @unchecked Sendable {
         let halfDim = headDim / 2
 
         let x1 = x[0 ..< x.shape[0], 0 ..< x.shape[1], 0 ..< x.shape[2], 0 ..< halfDim]
-        let x2 = x[0 ..< x.shape[0], 0 ..< x.shape[1], 0 ..< x.shape[2], halfDim ..< headDim]
+        let x2 = x[
+            0 ..< x.shape[0],
+            0 ..< x.shape[1],
+            0 ..< x.shape[2],
+            halfDim ..< headDim
+        ]
 
         let rotated = concatenated([-x2, x1], axis: -1)
 

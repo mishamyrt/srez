@@ -12,9 +12,17 @@ struct MeetingJob: Identifiable {
     var transcript: String?
     var output: MeetingOutput?
     var error: String?
-    var canSelectForSummary: Bool { state == .done && output != nil }
-    var canSummarize: Bool { canSelectForSummary && output?.summary == nil }
-    var retryTitle: String { output == nil ? "Повторить" : "Повторить суммаризацию" }
+    var canSelectForSummary: Bool {
+        state == .done && output != nil
+    }
+
+    var canSummarize: Bool {
+        canSelectForSummary && output?.summary == nil
+    }
+
+    var retryTitle: String {
+        output == nil ? "Повторить" : "Повторить суммаризацию"
+    }
 }
 
 @MainActor
@@ -36,7 +44,8 @@ final class MeetingQueue: ObservableObject {
     private var transcriptionWorker: (id: UUID, task: Task<MeetingOutput, Error>)?
     private var summaryWorker: (id: UUID, task: Task<MeetingOutput, Error>)?
     var hasPendingJobs: Bool {
-        combining || transcriptionWorker != nil || summaryWorker != nil || jobs.contains { $0.state == .waiting || $0.state == .running }
+        combining || transcriptionWorker != nil || summaryWorker != nil || jobs
+            .contains { $0.state == .waiting || $0.state == .running }
     }
 
     func chooseFiles() {
@@ -48,21 +57,28 @@ final class MeetingQueue: ObservableObject {
         panel.prompt = "Распознать"
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
-        panel.allowedContentTypes = ["mp3", "wav", "webm", "mp4", "m4a"].compactMap { UTType(filenameExtension: $0) }
+        panel.allowedContentTypes = ["mp3", "wav", "webm", "mp4", "m4a"]
+            .compactMap { UTType(filenameExtension: $0) }
         panel.begin { [weak self] response in
             Task { @MainActor in
                 self?.pickerPresented = false
                 self?.filePanel = nil
-                if response == .OK { self?.enqueue(panel.urls) }
+                if response == .OK {
+                    self?.enqueue(panel.urls)
+                }
             }
         }
     }
 
     func enqueue(_ urls: [URL]) {
-        if pickerPresented { filePanel?.cancel(nil) }
+        if pickerPresented {
+            filePanel?.cancel(nil)
+        }
         for url in urls {
             var job = MeetingJob(input: url)
-            if !["mp3", "wav", "webm", "mp4", "m4a"].contains(url.pathExtension.lowercased()) {
+            if !["mp3", "wav", "webm", "mp4", "m4a"]
+                .contains(url.pathExtension.lowercased())
+            {
                 job.state = .failed
                 job.stage = "Неподдерживаемый формат"
                 job.error = "Выберите MP3, WAV, WebM, MP4 или M4A."
@@ -86,7 +102,8 @@ final class MeetingQueue: ObservableObject {
 
     func retry(_ id: UUID) {
         guard let index = jobs.firstIndex(where: { $0.id == id }),
-              jobs[index].state == .failed || jobs[index].state == .cancelled else { return }
+              jobs[index].state == .failed || jobs[index].state == .cancelled
+        else { return }
         jobs[index].state = .waiting
         jobs[index].stage = jobs[index].output == nil ? "В очереди" : "В очереди на суммаризацию"
         jobs[index].error = nil
@@ -95,13 +112,16 @@ final class MeetingQueue: ObservableObject {
     }
 
     func summarize(_ id: UUID) {
-        guard let index = jobs.firstIndex(where: { $0.id == id }), jobs[index].canSummarize else { return }
+        guard let index = jobs.firstIndex(where: { $0.id == id }),
+              jobs[index].canSummarize else { return }
         jobs[index].state = .waiting
         jobs[index].stage = "В очереди на суммаризацию"
         startNext()
     }
 
-    func cancelCombination() { combinationWorker?.cancel() }
+    func cancelCombination() {
+        combinationWorker?.cancel()
+    }
 
     func summarizeTogether(_ ids: Set<UUID>) async throws {
         guard !combining else { return }
@@ -122,7 +142,9 @@ final class MeetingQueue: ObservableObject {
         let output = try await withTaskCancellationHandler {
             let output = try await task.value
             try Task.checkCancellation()
-            if task.isCancelled { throw CancellationError() }
+            if task.isCancelled {
+                throw CancellationError()
+            }
             return output
         } onCancel: {
             task.cancel()
@@ -158,10 +180,19 @@ final class MeetingQueue: ObservableObject {
                 await self.receive(event, for: job.id)
             }
             if let output = job.output {
-                return try await MeetingPipeline.summarize(output, settings: settings.get(), update: update)
+                return try await MeetingPipeline.summarize(
+                    output,
+                    settings: settings.get(),
+                    update: update
+                )
             }
-            return try await MeetingPipeline.run(input: job.input, settings: settings.get(),
-                                                 transcript: job.transcript, modelStore: modelStore, update: update)
+            return try await MeetingPipeline.run(
+                input: job.input,
+                settings: settings.get(),
+                transcript: job.transcript,
+                modelStore: modelStore,
+                update: update
+            )
         }
         if summarizing {
             summaryWorker = (job.id, task)
@@ -173,15 +204,16 @@ final class MeetingQueue: ObservableObject {
             if let index = jobs.firstIndex(where: { $0.id == job.id }) {
                 jobs[index].progress = nil
                 switch result {
-                case .success(let output):
+                case let .success(output):
                     jobs[index].state = .done
                     jobs[index].stage = output.summary == nil ? "Расшифровка готова" : "Готово"
                     jobs[index].output = output
                     jobs[index].transcript = nil
-                case .failure(let error):
+                case let .failure(error):
                     jobs[index].state = error is CancellationError ? .cancelled : .failed
                     jobs[index].stage = error is CancellationError ? "Отменено" : "Ошибка"
-                    jobs[index].error = error is CancellationError ? nil : error.localizedDescription
+                    jobs[index].error = error is CancellationError ? nil : error
+                        .localizedDescription
                 }
             }
             if summarizing {
@@ -199,11 +231,11 @@ final class MeetingQueue: ObservableObject {
     private func receive(_ event: MeetingEvent, for id: UUID) {
         guard let index = jobs.firstIndex(where: { $0.id == id }) else { return }
         switch event {
-        case .stage(let stage):
+        case let .stage(stage):
             jobs[index].stage = stage
             jobs[index].progress = nil
-        case .progress(let value): jobs[index].progress = value
-        case .transcript(let text): jobs[index].transcript = text
+        case let .progress(value): jobs[index].progress = value
+        case let .transcript(text): jobs[index].transcript = text
         }
     }
 }

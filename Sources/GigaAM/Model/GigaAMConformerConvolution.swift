@@ -31,29 +31,30 @@ public final class GigaAMConformerConvolution: @unchecked Sendable {
 
         // PyTorch Conv1d weights: [C_out, C_in, K]
         // MLX conv1d weights:    [C_out, K, C_in/groups]
-        self.pointwiseConv1Weight = transposed(
-            try store.load("\(prefix).pointwise_conv1.weight"),
+        pointwiseConv1Weight = try transposed(
+            store.load("\(prefix).pointwise_conv1.weight"),
             0, 2, 1
         )
-        self.pointwiseConv1Bias = try store.load("\(prefix).pointwise_conv1.bias")
+        pointwiseConv1Bias = try store.load("\(prefix).pointwise_conv1.bias")
 
-        self.depthwiseConvWeight = transposed(
-            try store.load("\(prefix).depthwise_conv.weight"),
+        depthwiseConvWeight = try transposed(
+            store.load("\(prefix).depthwise_conv.weight"),
             0, 2, 1
         )
-        self.depthwiseConvBias = try store.load("\(prefix).depthwise_conv.bias")
+        depthwiseConvBias = try store.load("\(prefix).depthwise_conv.bias")
 
-        // В Python поле называется batch_norm, но для этой модели norm_type == layer_norm.
-        self.convNorm = try GigaAMLayerNorm(
+        // В Python поле называется batch_norm, но для этой модели norm_type ==
+        // layer_norm.
+        convNorm = try GigaAMLayerNorm(
             store: store,
             prefix: "\(prefix).batch_norm"
         )
 
-        self.pointwiseConv2Weight = transposed(
-            try store.load("\(prefix).pointwise_conv2.weight"),
+        pointwiseConv2Weight = try transposed(
+            store.load("\(prefix).pointwise_conv2.weight"),
             0, 2, 1
         )
-        self.pointwiseConv2Bias = try store.load("\(prefix).pointwise_conv2.bias")
+        pointwiseConv2Bias = try store.load("\(prefix).pointwise_conv2.bias")
     }
 
     public func forward(_ x: MLXArray) -> MLXArray {

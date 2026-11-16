@@ -9,7 +9,7 @@ public struct MLXArraySummary: Sendable {
     public let max: Float
     public let mean: Float
 
-    public static func make(_ array: MLXArray, edgeCount: Int = 12) -> MLXArraySummary {
+    public static func make(_ array: MLXArray, edgeCount: Int = 12) -> Self {
         eval(array)
 
         let floatArray = array.asType(Float.self).asArray(Float.self)
@@ -27,7 +27,7 @@ public struct MLXArraySummary: Sendable {
             meanValue = floatArray.reduce(0, +) / Float(floatArray.count)
         }
 
-        return MLXArraySummary(
+        return Self(
             shape: array.shape,
             firstValues: first,
             lastValues: last,

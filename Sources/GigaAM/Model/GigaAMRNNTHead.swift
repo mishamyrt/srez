@@ -29,8 +29,8 @@ public final class GigaAMRNNTHead: @unchecked Sendable {
 
     public init(store: GigaAMTensorStore, blankId: Int = 1024) throws {
         self.blankId = blankId
-        self.decoder = try GigaAMRNNTDecoder(store: store, blankId: blankId)
-        self.joint = try GigaAMRNNTJoint(store: store)
+        decoder = try GigaAMRNNTDecoder(store: store, blankId: blankId)
+        joint = try GigaAMRNNTJoint(store: store)
     }
 
     public func step(
@@ -66,7 +66,9 @@ public final class GigaAMRNNTHead: @unchecked Sendable {
         let readbackStart = Self.now()
         let flat = logProbs.asType(Float.self).asArray(Float.self)
 
-        guard let best = flat.enumerated().max(by: { lhs, rhs in lhs.element < rhs.element }) else {
+        guard let best = flat.enumerated()
+            .max(by: { lhs, rhs in lhs.element < rhs.element })
+        else {
             throw GigaAMError.invalidManifest("RNNT step produced empty log_probs")
         }
 

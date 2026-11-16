@@ -5,7 +5,7 @@ public final class GigaAMConformerEncoderStack: @unchecked Sendable {
     public let layers: [GigaAMConformerLayer]
 
     public init(store: GigaAMTensorStore, layerCount: Int = 16) throws {
-        self.layers = try (0..<layerCount).map { index in
+        layers = try (0 ..< layerCount).map { index in
             try GigaAMConformerLayer(store: store, layerIndex: index)
         }
     }

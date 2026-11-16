@@ -6,7 +6,7 @@ public struct ModelBundle: Sendable {
     public let weightsURL: URL?
     public let tokenizerURL: URL?
 
-    public static func load(configuration: GigaAMConfiguration) throws -> ModelBundle {
+    public static func load(configuration: GigaAMConfiguration) throws -> Self {
         if let directory = configuration.modelDirectory {
             return try loadExternal(directory: directory)
         }
@@ -14,9 +14,11 @@ public struct ModelBundle: Sendable {
         return try loadBundled()
     }
 
-    private static func loadExternal(directory: URL) throws -> ModelBundle {
+    private static func loadExternal(directory: URL) throws -> Self {
         var isDir: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: directory.path, isDirectory: &isDir), isDir.boolValue else {
+        guard FileManager.default.fileExists(atPath: directory.path, isDirectory: &isDir),
+              isDir.boolValue
+        else {
             throw GigaAMError.modelDirectoryNotFound(directory.path)
         }
 
@@ -29,20 +31,23 @@ public struct ModelBundle: Sendable {
         let manifest = try JSONDecoder().decode(GigaAMManifest.self, from: data)
 
         let weightsURL = directory.appendingPathComponent(manifest.weightsFile)
-        let tokenizerURL = manifest.tokenizerFile.map { directory.appendingPathComponent($0) }
+        let tokenizerURL = manifest.tokenizerFile
+            .map { directory.appendingPathComponent($0) }
 
-        return ModelBundle(
+        return Self(
             directory: directory,
             manifest: manifest,
-            weightsURL: FileManager.default.fileExists(atPath: weightsURL.path) ? weightsURL : nil,
-            tokenizerURL: tokenizerURL.flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
+            weightsURL: FileManager.default
+                .fileExists(atPath: weightsURL.path) ? weightsURL : nil,
+            tokenizerURL: tokenizerURL
+                .flatMap { FileManager.default.fileExists(atPath: $0.path) ? $0 : nil }
         )
     }
 
-    private static func loadBundled() throws -> ModelBundle {
+    private static func loadBundled() throws -> Self {
         throw GigaAMError.manifestNotFound(
             "No bundled model found. Use GigaAMConfiguration(modelDirectory:) " +
-            "to provide the model path explicitly."
+                "to provide the model path explicitly."
         )
     }
 }

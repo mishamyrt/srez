@@ -24,14 +24,16 @@ public enum SafetensorsReader {
         }
 
         guard tensor.dataOffsets.count == 2 else {
-            throw GigaAMError.invalidManifest("Tensor has invalid data_offsets: \(tensorName)")
+            throw GigaAMError
+                .invalidManifest("Tensor has invalid data_offsets: \(tensorName)")
         }
 
         let start = index.dataStartOffset + UInt64(tensor.dataOffsets[0])
         let end = index.dataStartOffset + UInt64(tensor.dataOffsets[1])
 
         guard end >= start else {
-            throw GigaAMError.invalidManifest("Tensor has invalid byte range: \(tensorName)")
+            throw GigaAMError
+                .invalidManifest("Tensor has invalid byte range: \(tensorName)")
         }
 
         let byteCount = Int(end - start)

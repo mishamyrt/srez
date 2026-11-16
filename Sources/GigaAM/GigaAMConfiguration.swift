@@ -17,13 +17,13 @@ public struct GigaAMConfiguration: Sendable {
     public var sampleRate: Int
     public var chunkDuration: TimeInterval
 
-    public static let pro = GigaAMConfiguration()
+    public static let pro = Self()
 
     public init(
         variant: ModelVariant = .pro,
         computeMode: ComputeMode = .automatic,
         modelDirectory: URL? = nil,
-        sampleRate: Int = 16_000,
+        sampleRate: Int = 16000,
         chunkDuration: TimeInterval = 20.0
     ) {
         self.variant = variant

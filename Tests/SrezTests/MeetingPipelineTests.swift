@@ -298,6 +298,21 @@ final class MeetingPipelineTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: output.transcript), " \n ")
     }
 
+    func testProcessFailureKeepsInvalidUTF8Diagnostics() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        do {
+            try await MeetingPipeline.runProcess(
+                URL(fileURLWithPath: "/bin/sh"),
+                arguments: ["-c", "printf '\\377deliberate-error' >&2; exit 7"], directory: directory
+            )
+            XCTFail("Expected nonzero exit to fail")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("deliberate-error"))
+            XCTAssertTrue(error.localizedDescription.contains("7"))
+        }
+    }
+
     func testProcessFailureAndCancellation() async throws {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

@@ -7,8 +7,8 @@ public final class GigaAMRecognizer: @unchecked Sendable {
 
     public init(configuration: GigaAMConfiguration = .pro) throws {
         self.configuration = configuration
-        self.bundle = try ModelBundle.load(configuration: configuration)
-        self.model = try GigaAMProModel(bundle: bundle)
+        bundle = try ModelBundle.load(configuration: configuration)
+        model = try GigaAMProModel(bundle: bundle)
     }
 
     public func info() -> String {
@@ -51,7 +51,10 @@ public final class GigaAMRecognizer: @unchecked Sendable {
         }
 
         let sampleRate = bundle.manifest.sampleRate
-        let chunkSize = try Self.chunkSize(duration: configuration.chunkDuration, sampleRate: sampleRate)
+        let chunkSize = try Self.chunkSize(
+            duration: configuration.chunkDuration,
+            sampleRate: sampleRate
+        )
         let reader = try AudioLoader.Reader(url: url, targetSampleRate: sampleRate)
         var text: [String] = []
         var words: [GigaAMProWord] = []
@@ -59,24 +62,39 @@ public final class GigaAMRecognizer: @unchecked Sendable {
         await progress?(0)
         while let samples = try reader.nextChunk(size: chunkSize) {
             try Task.checkCancellation()
-            let transcription = try model.transcribe(samples: samples, sampleRate: sampleRate)
-            if !transcription.text.isEmpty { text.append(transcription.text) }
+            let transcription = try model.transcribe(
+                samples: samples,
+                sampleRate: sampleRate
+            )
+            if !transcription.text.isEmpty {
+                text.append(transcription.text)
+            }
             let seconds = TimeInterval(offset) / TimeInterval(sampleRate)
             words += transcription.words.map {
-                GigaAMProWord(text: $0.text, start: $0.start + seconds, end: $0.end + seconds)
+                GigaAMProWord(
+                    text: $0.text,
+                    start: $0.start + seconds,
+                    end: $0.end + seconds
+                )
             }
             offset += samples.count
             try Task.checkCancellation()
-            await progress?(min(1, Double(offset) / Double(max(1, reader.estimatedSampleCount))))
+            await progress?(min(
+                1,
+                Double(offset) / Double(max(1, reader.estimatedSampleCount))
+            ))
         }
         guard offset > 0 else {
             throw GigaAMError.invalidArguments("Audio is empty")
         }
         await progress?(1)
-        return GigaAMResult(text: text.joined(separator: " "), segments: [], words: words,
-                           duration: TimeInterval(offset) / TimeInterval(sampleRate))
+        return GigaAMResult(
+            text: text.joined(separator: " "),
+            segments: [],
+            words: words,
+            duration: TimeInterval(offset) / TimeInterval(sampleRate)
+        )
     }
-
 
     public func transcribeTimed(
         features: [Float],
@@ -116,7 +134,10 @@ public final class GigaAMRecognizer: @unchecked Sendable {
         let duration = TimeInterval(samples.count) / TimeInterval(sampleRate)
 
         if samples.count <= chunkSize {
-            let transcription = try model.transcribe(samples: samples, sampleRate: sampleRate)
+            let transcription = try model.transcribe(
+                samples: samples,
+                sampleRate: sampleRate
+            )
             try Task.checkCancellation()
             await progress?(1)
             return GigaAMResult(
@@ -135,11 +156,17 @@ public final class GigaAMRecognizer: @unchecked Sendable {
                 samples: Array(samples[range]),
                 sampleRate: sampleRate
             )
-            if !transcription.text.isEmpty { text.append(transcription.text) }
+            if !transcription.text.isEmpty {
+                text.append(transcription.text)
+            }
 
             let offset = TimeInterval(range.lowerBound) / TimeInterval(sampleRate)
             words += transcription.words.map {
-                GigaAMProWord(text: $0.text, start: $0.start + offset, end: $0.end + offset)
+                GigaAMProWord(
+                    text: $0.text,
+                    start: $0.start + offset,
+                    end: $0.end + offset
+                )
             }
             try Task.checkCancellation()
             await progress?(Double(range.upperBound) / Double(samples.count))
@@ -156,7 +183,8 @@ public final class GigaAMRecognizer: @unchecked Sendable {
     static func chunkSize(duration: TimeInterval, sampleRate: Int) throws -> Int {
         let count = duration * Double(sampleRate)
         guard sampleRate > 0, count.isFinite, count >= 320, count < Double(Int.max) else {
-            throw GigaAMError.invalidArguments("chunkDuration must be at least 320 samples")
+            throw GigaAMError
+                .invalidArguments("chunkDuration must be at least 320 samples")
         }
         return Int(count)
     }
@@ -166,8 +194,10 @@ public final class GigaAMRecognizer: @unchecked Sendable {
         var start = 0
         while start < sampleCount {
             var end = start + min(chunkSize, sampleCount - start)
-            if sampleCount - end < 320 { end = sampleCount }
-            ranges.append(start..<end)
+            if sampleCount - end < 320 {
+                end = sampleCount
+            }
+            ranges.append(start ..< end)
             start = end
         }
         return ranges

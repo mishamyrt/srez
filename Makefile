@@ -22,3 +22,11 @@ app-test: test
 
 clean:
 	rm -rf .build .xcode-derived
+
+.PHONY: lint
+lint: ## lint and fix the code
+	@swiftlint lint --config .swiftlint.yaml --quiet
+
+.PHONY: fmt
+fmt: ## format the code
+	@swiftformat Sources/

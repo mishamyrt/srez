@@ -1,5 +1,5 @@
-import Foundation
 import AVFoundation
+import Foundation
 
 public struct AudioBuffer: Sendable {
     public let samples: [Float]
@@ -14,7 +14,7 @@ public struct AudioBuffer: Sendable {
 public enum AudioLoader {
     public static func loadMonoFloat32(
         url: URL,
-        targetSampleRate: Int = 16_000
+        targetSampleRate: Int = 16000
     ) throws -> AudioBuffer {
         let reader = try Reader(url: url, targetSampleRate: targetSampleRate)
         var samples: [Float] = []
@@ -39,18 +39,36 @@ public enum AudioLoader {
             guard targetSampleRate > 0 else {
                 throw GigaAMError.invalidArguments("Sample rate must be positive")
             }
-            file = try AVAudioFile(forReading: url, commonFormat: .pcmFormatFloat32, interleaved: false)
-            estimatedSampleCount = Int(ceil(Double(file.length) * Double(targetSampleRate) / file.processingFormat.sampleRate))
-            guard let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: 4096) else {
-                throw GigaAMError.invalidArguments("Failed to allocate source audio buffer")
+            file = try AVAudioFile(
+                forReading: url,
+                commonFormat: .pcmFormatFloat32,
+                interleaved: false
+            )
+            estimatedSampleCount =
+                Int(ceil(Double(file.length) * Double(targetSampleRate) / file
+                        .processingFormat.sampleRate))
+            guard let buffer = AVAudioPCMBuffer(
+                pcmFormat: file.processingFormat,
+                frameCapacity: 4096
+            ) else {
+                throw GigaAMError
+                    .invalidArguments("Failed to allocate source audio buffer")
             }
             inputBuffer = buffer
             if file.processingFormat.sampleRate == Double(targetSampleRate) {
                 converter = nil
             } else {
-                guard let format = AVAudioFormat(commonFormat: .pcmFormatFloat32,
-                                                sampleRate: Double(targetSampleRate), channels: 1, interleaved: false),
-                      let converter = AVAudioConverter(from: file.processingFormat, to: format) else {
+                guard let format = AVAudioFormat(
+                          commonFormat: .pcmFormatFloat32,
+                          sampleRate: Double(targetSampleRate),
+                          channels: 1,
+                          interleaved: false
+                      ),
+                      let converter = AVAudioConverter(
+                          from: file.processingFormat,
+                          to: format
+                      )
+                else {
                     throw GigaAMError.invalidArguments("Failed to create audio converter")
                 }
                 self.converter = converter
@@ -60,7 +78,8 @@ public enum AudioLoader {
         func nextChunk(size: Int) throws -> [Float]? {
             try Task.checkCancellation()
             guard size >= 320 else {
-                throw GigaAMError.invalidArguments("Audio chunks must contain at least 320 samples")
+                throw GigaAMError
+                    .invalidArguments("Audio chunks must contain at least 320 samples")
             }
             guard !finished else { return nil }
             var chunk = try pending ?? read(upToCount: size)
@@ -80,7 +99,9 @@ public enum AudioLoader {
             while samples.count < count {
                 try Task.checkCancellation()
                 let part = try readBuffer(upToCount: count - samples.count)
-                if part.isEmpty { break }
+                if part.isEmpty {
+                    break
+                }
                 samples.append(contentsOf: part)
             }
             return samples
@@ -91,38 +112,67 @@ public enum AudioLoader {
                 throw GigaAMError.invalidArguments("Invalid audio chunk size: \(count)")
             }
             let format = converter?.outputFormat ?? file.processingFormat
-            guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(count)) else {
-                throw GigaAMError.invalidArguments("Failed to allocate output audio buffer")
+            guard let buffer = AVAudioPCMBuffer(
+                pcmFormat: format,
+                frameCapacity: AVAudioFrameCount(count)
+            ) else {
+                throw GigaAMError
+                    .invalidArguments("Failed to allocate output audio buffer")
             }
             if let converter {
                 var readError: Error?
                 var conversionError: NSError?
-                let status = converter.convert(to: buffer, error: &conversionError) { [self] requested, status in
-                    do {
-                        try Task.checkCancellation()
-                        guard file.framePosition < file.length else {
+                let status = converter
+                    .convert(
+                        to: buffer,
+                        error: &conversionError
+                    ) { [self] requested, status in
+                        do {
+                            try Task.checkCancellation()
+                            guard file.framePosition < file.length else {
+                                status.pointee = .endOfStream
+                                return nil
+                            }
+                            let frames = min(
+                                AVAudioFramePosition(min(
+                                    requested,
+                                    inputBuffer.frameCapacity
+                                )),
+                                file.length - file.framePosition
+                            )
+                            try file.read(
+                                into: inputBuffer,
+                                frameCount: AVAudioFrameCount(frames)
+                            )
+                            status.pointee = inputBuffer
+                                .frameLength == 0 ? .endOfStream : .haveData
+                            return inputBuffer.frameLength == 0 ? nil : inputBuffer
+                        } catch {
+                            readError = error
                             status.pointee = .endOfStream
                             return nil
                         }
-                        let frames = min(AVAudioFramePosition(min(requested, inputBuffer.frameCapacity)),
-                                         file.length - file.framePosition)
-                        try file.read(into: inputBuffer, frameCount: AVAudioFrameCount(frames))
-                        status.pointee = inputBuffer.frameLength == 0 ? .endOfStream : .haveData
-                        return inputBuffer.frameLength == 0 ? nil : inputBuffer
-                    } catch {
-                        readError = error
-                        status.pointee = .endOfStream
-                        return nil
                     }
+                if let readError {
+                    throw readError
                 }
-                if let readError { throw readError }
-                if let conversionError { throw conversionError }
+                if let conversionError {
+                    throw conversionError
+                }
                 guard status != .error else {
                     throw GigaAMError.invalidArguments("Audio conversion failed")
                 }
             } else {
-                let frames = min(AVAudioFramePosition(count), file.length - file.framePosition)
-                if frames > 0 { try file.read(into: buffer, frameCount: AVAudioFrameCount(frames)) }
+                let frames = min(
+                    AVAudioFramePosition(count),
+                    file.length - file.framePosition
+                )
+                if frames > 0 {
+                    try file.read(
+                        into: buffer,
+                        frameCount: AVAudioFrameCount(frames)
+                    )
+                }
             }
             guard let channels = buffer.floatChannelData else {
                 throw GigaAMError.invalidArguments("Audio has no Float32 channel data")
@@ -133,8 +183,12 @@ public enum AudioLoader {
                 return Array(UnsafeBufferPointer(start: channels[0], count: frames))
             }
             var samples = [Float](repeating: 0, count: frames)
-            for channel in 0..<channelCount {
-                for frame in 0..<frames { samples[frame] += channels[channel][frame] / Float(channelCount) }
+            for channel in 0 ..< channelCount {
+                for frame in 0 ..<
+                    frames
+                {
+                    samples[frame] += channels[channel][frame] / Float(channelCount)
+                }
             }
             return samples
         }

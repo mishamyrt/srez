@@ -34,17 +34,17 @@ public final class GigaAMPreEncoder: @unchecked Sendable {
 
         // PyTorch Conv1d weights are [C_out, C_in, K].
         // MLX conv1d weights are [C_out, K, C_in].
-        self.conv0Weight = transposed(
-            try store.load("model.encoder.pre_encode.conv.0.weight"),
+        conv0Weight = try transposed(
+            store.load("model.encoder.pre_encode.conv.0.weight"),
             0, 2, 1
         )
-        self.conv0Bias = try store.load("model.encoder.pre_encode.conv.0.bias")
+        conv0Bias = try store.load("model.encoder.pre_encode.conv.0.bias")
 
-        self.conv2Weight = transposed(
-            try store.load("model.encoder.pre_encode.conv.2.weight"),
+        conv2Weight = try transposed(
+            store.load("model.encoder.pre_encode.conv.2.weight"),
             0, 2, 1
         )
-        self.conv2Bias = try store.load("model.encoder.pre_encode.conv.2.bias")
+        conv2Bias = try store.load("model.encoder.pre_encode.conv.2.bias")
     }
 
     public func forward(_ x: MLXArray, length: Int) -> GigaAMPreEncoderOutput {
@@ -79,7 +79,7 @@ public final class GigaAMPreEncoder: @unchecked Sendable {
         var length = Float(inputLength)
         let addPad = Float(2 * padding - kernelSize)
 
-        for _ in 0..<2 {
+        for _ in 0 ..< 2 {
             length = floor((length + addPad) / Float(stride) + 1.0)
         }
 

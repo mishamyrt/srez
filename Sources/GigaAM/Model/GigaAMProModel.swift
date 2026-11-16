@@ -55,11 +55,14 @@ public final class GigaAMProModel: @unchecked Sendable {
     public init(bundle: ModelBundle) throws {
         self.bundle = bundle
 
-        guard let assetsDirectory = bundle.directory ?? bundle.tokenizerURL?.deletingLastPathComponent() else {
-            throw GigaAMError.modelDirectoryNotFound("Cannot resolve model assets directory")
+        guard let assetsDirectory = bundle.directory ?? bundle.tokenizerURL?
+            .deletingLastPathComponent()
+        else {
+            throw GigaAMError
+                .modelDirectoryNotFound("Cannot resolve model assets directory")
         }
 
-        self.melProcessor = try MelSpectrogramProcessor(
+        melProcessor = try MelSpectrogramProcessor(
             config: MelSpectrogramConfig(sampleRate: bundle.manifest.sampleRate),
             assetsDirectory: assetsDirectory
         )
@@ -72,16 +75,16 @@ public final class GigaAMProModel: @unchecked Sendable {
             throw GigaAMError.fileNotFound("tokenizer.model is not attached")
         }
 
-        self.store = try GigaAMTensorStore(weightsURL: weightsURL)
-        self.encoder = try GigaAMEncoder(store: store)
-        self.head = try GigaAMRNNTHead(store: store, blankId: 1024)
-        self.greedyDecoder = RNNTGreedyDecoder(
+        store = try GigaAMTensorStore(weightsURL: weightsURL)
+        encoder = try GigaAMEncoder(store: store)
+        head = try GigaAMRNNTHead(store: store, blankId: 1024)
+        greedyDecoder = RNNTGreedyDecoder(
             config: RNNTGreedyDecoderConfig(
                 blankId: 1024,
                 maxSymbolsPerFrame: 10
             )
         )
-        self.tokenizer = try SentencePieceTokenizer(modelURL: tokenizerURL)
+        tokenizer = try SentencePieceTokenizer(modelURL: tokenizerURL)
     }
 
     public func transcribe(
@@ -102,15 +105,18 @@ public final class GigaAMProModel: @unchecked Sendable {
         length: Int
     ) throws -> GigaAMProTimedTranscription {
         guard shape.count == 3 else {
-            throw GigaAMError.invalidArguments("Expected features shape [B, 64, T], got \(shape)")
+            throw GigaAMError
+                .invalidArguments("Expected features shape [B, 64, T], got \(shape)")
         }
 
         guard shape[0] == 1 else {
-            throw GigaAMError.invalidArguments("Only batch size 1 is supported now, got \(shape[0])")
+            throw GigaAMError
+                .invalidArguments("Only batch size 1 is supported now, got \(shape[0])")
         }
 
         guard shape[1] == 64 else {
-            throw GigaAMError.invalidArguments("Expected 64 mel features, got \(shape[1])")
+            throw GigaAMError
+                .invalidArguments("Expected 64 mel features, got \(shape[1])")
         }
 
         guard features.count == shape.reduce(1, *) else {
@@ -170,7 +176,6 @@ public final class GigaAMProModel: @unchecked Sendable {
             )
         )
     }
-
 
     public func transcribe(
         samples: [Float],
@@ -266,7 +271,7 @@ public final class GigaAMProModel: @unchecked Sendable {
             throw GigaAMError.invalidArguments("Empty features")
         }
 
-        let flat = features.flatMap { $0 }
+        let flat = features.flatMap(\.self)
         let result = try transcribe(
             features: flat,
             shape: [1, features.count, first.count],
