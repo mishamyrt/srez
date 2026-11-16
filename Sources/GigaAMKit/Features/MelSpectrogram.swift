@@ -1,4 +1,5 @@
 import Foundation
+import Accelerate
 
 public struct MelSpectrogramConfig: Sendable, Codable, Hashable {
     public let sampleRate: Int
@@ -31,8 +32,7 @@ public final class MelSpectrogramProcessor: @unchecked Sendable {
 
     private let window: [Float]
     private let filterbank: [Float]
-    private let cosTable: [Float]
-    private let sinTable: [Float]
+    private let dft: vDSP_DFT_Setup
 
     public init(
         config: MelSpectrogramConfig = MelSpectrogramConfig(),
@@ -70,10 +70,13 @@ public final class MelSpectrogramProcessor: @unchecked Sendable {
         self.window = window
         self.filterbank = filterbank
 
-        let tables = Self.makeDFTTables(nFFT: config.nFFT, nFreqs: nFreqs)
-        self.cosTable = tables.cos
-        self.sinTable = tables.sin
+        guard let dft = vDSP_DFT_zop_CreateSetup(nil, vDSP_Length(config.nFFT), .FORWARD) else {
+            throw GigaAMError.invalidArguments("Unsupported DFT length: \(config.nFFT)")
+        }
+        self.dft = dft
     }
+
+    deinit { vDSP_DFT_DestroySetup(dft) }
 
     public func compute(samples: [Float]) throws -> [[Float]] {
         guard samples.count >= config.winLength else {
@@ -89,23 +92,18 @@ public final class MelSpectrogramProcessor: @unchecked Sendable {
             count: nFreqs * frameCount
         )
 
-        // STFT power, layout [freq, frame], matching torch.stft(...).abs().pow(2).
+        // Complex DFT keeps the same unnormalized power and first nFFT / 2 + 1 bins.
+        var real = [Float](repeating: 0, count: config.nFFT)
+        let imag = real
+        var realOut = real
+        var imagOut = real
         for frameIndex in 0..<frameCount {
             let frameOffset = frameIndex * config.hopLength
-
+            for n in 0..<config.nFFT { real[n] = samples[frameOffset + n] * window[n] }
+            vDSP_DFT_Execute(dft, real, imag, &realOut, &imagOut)
             for freqIndex in 0..<nFreqs {
-                let tableOffset = freqIndex * config.nFFT
-
-                var real = Float(0)
-                var imag = Float(0)
-
-                for n in 0..<config.nFFT {
-                    let sample = samples[frameOffset + n] * window[n]
-                    real += sample * cosTable[tableOffset + n]
-                    imag -= sample * sinTable[tableOffset + n]
-                }
-
-                power[freqIndex * frameCount + frameIndex] = real * real + imag * imag
+                power[freqIndex * frameCount + frameIndex] =
+                    realOut[freqIndex] * realOut[freqIndex] + imagOut[freqIndex] * imagOut[freqIndex]
             }
         }
 
@@ -161,30 +159,6 @@ public final class MelSpectrogramProcessor: @unchecked Sendable {
             shape: [1, config.nMels, frameCount],
             length: frameCount
         )
-    }
-
-    private struct DFTTables {
-        let cos: [Float]
-        let sin: [Float]
-    }
-
-    private static func makeDFTTables(nFFT: Int, nFreqs: Int) -> DFTTables {
-        var cosTable = [Float](repeating: 0, count: nFreqs * nFFT)
-        var sinTable = [Float](repeating: 0, count: nFreqs * nFFT)
-
-        let twoPi = 2.0 * Double.pi
-
-        for freqIndex in 0..<nFreqs {
-            let offset = freqIndex * nFFT
-
-            for n in 0..<nFFT {
-                let angle = twoPi * Double(freqIndex * n) / Double(nFFT)
-                cosTable[offset + n] = Float(cos(angle))
-                sinTable[offset + n] = Float(sin(angle))
-            }
-        }
-
-        return DFTTables(cos: cosTable, sin: sinTable)
     }
 
     private static func outputLength(sampleCount: Int, config: MelSpectrogramConfig) -> Int {
