@@ -11,7 +11,7 @@ log="$repo/.build/ffmpeg-build.log"
 mkdir -p "$build"
 
 if [[ ! -f "$archive" ]] || [[ "$(shasum -a 256 "$archive" | awk '{ print $1 }')" != "$source_sha" ]]; then
-    echo "Скачивание исходников FFmpeg $version…"
+    echo "Скачивание исходников FFmpeg ${version}…"
     curl --fail --location --silent --show-error --retry 3 --connect-timeout 20 --max-time 180 \
         "https://ffmpeg.org/releases/ffmpeg-$version.tar.xz" -o "$archive.part"
     printf '%s  %s\n' "$source_sha" "$archive.part" | shasum -a 256 --check --status
@@ -23,7 +23,7 @@ if [[ -x "$build/ffmpeg" && -f "$build/build.sha256" ]] && [[ "$(cat "$build/bui
     exit 0
 fi
 
-echo "Сборка встроенного FFmpeg $version…"
+echo "Сборка встроенного FFmpeg ${version}…"
 rm -rf "$source"
 mkdir -p "$source"
 tar -xJf "$archive" --strip-components=1 -C "$source"
