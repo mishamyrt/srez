@@ -21,12 +21,22 @@ struct MeetingJob: Identifiable {
 final class MeetingQueue: ObservableObject {
     @Published var jobs: [MeetingJob] = []
     @Published var pickerPresented = false
+    @Published private(set) var combining = false
+    private var combinationWorker: Task<MeetingOutput, Error>?
+    private let combine: @Sendable ([MeetingOutput], URL) throws -> MeetingOutput
+
+    init(combine: @escaping @Sendable ([MeetingOutput], URL) throws -> MeetingOutput = {
+        try MeetingPipeline.combineTranscripts($0, directory: $1)
+    }) {
+        self.combine = combine
+    }
+
     private var filePanel: NSOpenPanel?
     private let modelStore = ModelStore()
     private var transcriptionWorker: (id: UUID, task: Task<MeetingOutput, Error>)?
     private var summaryWorker: (id: UUID, task: Task<MeetingOutput, Error>)?
     var hasPendingJobs: Bool {
-        transcriptionWorker != nil || summaryWorker != nil || jobs.contains { $0.state == .waiting || $0.state == .running }
+        combining || transcriptionWorker != nil || summaryWorker != nil || jobs.contains { $0.state == .waiting || $0.state == .running }
     }
 
     func chooseFiles() {
@@ -91,12 +101,32 @@ final class MeetingQueue: ObservableObject {
         startNext()
     }
 
-    func summarizeTogether(_ ids: Set<UUID>) throws {
+    func cancelCombination() { combinationWorker?.cancel() }
+
+    func summarizeTogether(_ ids: Set<UUID>) async throws {
+        guard !combining else { return }
         let selected = jobs.filter { ids.contains($0.id) && $0.canSelectForSummary }
         guard selected.count > 1, selected.count == ids.count else { return }
         let settings = try MeetingSettings.current(summarizing: true)
-        let output = try MeetingPipeline.combineTranscripts(selected.compactMap(\.output),
-                                                           directory: settings.outputDirectory)
+        let outputs = selected.compactMap(\.output)
+        let combine = combine
+        combining = true
+        let task = Task.detached(priority: .userInitiated) {
+            try combine(outputs, settings.outputDirectory)
+        }
+        combinationWorker = task
+        defer {
+            combinationWorker = nil
+            combining = false
+        }
+        let output = try await withTaskCancellationHandler {
+            let output = try await task.value
+            try Task.checkCancellation()
+            if task.isCancelled { throw CancellationError() }
+            return output
+        } onCancel: {
+            task.cancel()
+        }
         var job = MeetingJob(input: output.transcript)
         job.output = output
         job.stage = "В очереди на суммаризацию"

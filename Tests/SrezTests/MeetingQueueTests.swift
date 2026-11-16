@@ -3,6 +3,45 @@ import XCTest
 
 final class MeetingQueueTests: XCTestCase {
     @MainActor
+    func testCombiningDoesNotBlockMainActorAndCanBeCancelled() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let defaults = UserDefaults.standard
+        let settings = ["outputDirectory": directory.path, "codexPath": "/usr/bin/false"]
+        let previous = settings.keys.map { ($0, defaults.object(forKey: $0)) }
+        defer { for (key, value) in previous { defaults.set(value, forKey: key) } }
+        for (key, value) in settings { defaults.set(value, forKey: key) }
+        let queue = MeetingQueue { outputs, directory in
+            XCTAssertFalse(Thread.isMainThread)
+            Thread.sleep(forTimeInterval: 0.3)
+            return try MeetingPipeline.combineTranscripts(outputs, directory: directory)
+        }
+        for index in 0..<2 {
+            let file = directory.appendingPathComponent("\(index).raw.txt")
+            try "Текст встречи.".write(to: file, atomically: true, encoding: .utf8)
+            var job = MeetingJob(input: file)
+            job.state = .done
+            job.output = MeetingOutput(transcript: file)
+            queue.jobs.append(job)
+        }
+        let ids = Set(queue.jobs.map(\.id))
+        let started = Date()
+        let task = Task { try await queue.summarizeTogether(ids) }
+        try await waitUntil { queue.combining }
+        XCTAssertLessThan(Date().timeIntervalSince(started), 0.2)
+        XCTAssertTrue(queue.hasPendingJobs)
+        try await queue.summarizeTogether(ids)
+        queue.cancelCombination()
+        do { try await task.value; XCTFail("Expected cancellation") }
+        catch { XCTAssertTrue(error is CancellationError) }
+        XCTAssertFalse(queue.combining)
+        XCTAssertFalse(queue.hasPendingJobs)
+        XCTAssertEqual(queue.jobs.count, 2)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path).count, 2)
+    }
+
+    @MainActor
     func testCombinedSummaryPreservesOriginalJobsAndCanRetry() async throws {
         let fm = FileManager.default
         let directory = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -32,14 +71,14 @@ final class MeetingQueueTests: XCTestCase {
         queue.jobs = originals
         queue.jobs[1].output?.summary = existingSummary
 
-        try queue.summarizeTogether([])
-        try queue.summarizeTogether([originals[0].id])
-        try queue.summarizeTogether([originals[0].id, UUID()])
+        try await queue.summarizeTogether([])
+        try await queue.summarizeTogether([originals[0].id])
+        try await queue.summarizeTogether([originals[0].id, UUID()])
         queue.jobs[1].state = .running
-        try queue.summarizeTogether([originals[1].id, originals[0].id])
+        try await queue.summarizeTogether([originals[1].id, originals[0].id])
         XCTAssertEqual(queue.jobs.count, 3)
         queue.jobs[1].state = .done
-        try queue.summarizeTogether([originals[1].id, originals[0].id])
+        try await queue.summarizeTogether([originals[1].id, originals[0].id])
         XCTAssertEqual(queue.jobs.count, 4)
         XCTAssertTrue(queue.jobs.prefix(3).allSatisfy { $0.state == .done })
         let combined = try XCTUnwrap(queue.jobs.last)

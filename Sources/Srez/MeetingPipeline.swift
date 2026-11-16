@@ -64,12 +64,14 @@ enum MeetingPipeline {
 
     static func combineTranscripts(_ outputs: [MeetingOutput], directory: URL) throws -> MeetingOutput {
         let texts = try outputs.map { output in
+            try Task.checkCancellation()
             let text = try String(contentsOf: output.transcript, encoding: .utf8)
             guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 throw MeetingError(message: "Расшифровка «\(output.transcript.lastPathComponent)» пуста. Нет текста для суммаризации.")
             }
             return text
         }
+        try Task.checkCancellation()
         try prepareOutputDirectory(directory)
         let file = try saveFile(texts.joined(separator: "\n\n"),
                                 title: "Общая расшифровка (\(outputs.count))",

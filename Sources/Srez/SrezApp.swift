@@ -76,6 +76,7 @@ final class MeetingsDelegate: NSObject, NSApplicationDelegate {
         alert.addButton(withTitle: "Продолжить работу")
         alert.addButton(withTitle: "Выйти")
         guard alert.runModal() == .alertSecondButtonReturn else { return .terminateCancel }
+        queue.cancelCombination()
         for job in queue.jobs where job.state == .waiting { queue.cancel(job.id) }
         for job in queue.jobs where job.state == .running { queue.cancel(job.id) }
         Task {
@@ -131,15 +132,19 @@ struct MeetingsView: View {
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                     Spacer()
-                    Button("Суммаризировать вместе") {
-                        do {
-                            try queue.summarizeTogether(selectedIDs)
-                            selectedIDs.removeAll()
-                        } catch {
-                            summaryError = error.localizedDescription
+                    Button(queue.combining ? "Объединение…" : "Суммаризировать вместе") {
+                        let ids = selectedIDs
+                        Task {
+                            do {
+                                try await queue.summarizeTogether(ids)
+                                selectedIDs.subtract(ids)
+                            } catch is CancellationError {
+                            } catch {
+                                summaryError = error.localizedDescription
+                            }
                         }
                     }
-                    .disabled(selectedIDs.count < 2 || !codexAvailable)
+                    .disabled(selectedIDs.count < 2 || !codexAvailable || queue.combining)
                     .help("Объединить расшифровки в порядке списка и создать общий конспект")
                     Button("Снять выделение", systemImage: "xmark") { selectedIDs.removeAll() }
                         .labelStyle(.iconOnly)
