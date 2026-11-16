@@ -1,22 +1,22 @@
 import AppKit
 import SwiftUI
 
-struct MeetingJobView: View {
+struct MeetingRowView: View {
     let job: MeetingJob
-    @ObservedObject private var queue: MeetingQueue
-    let codexAvailable: Bool
+    @ObservedObject private var model: MeetingsViewModel
+    let providerAvailable: Bool
     @Binding var selectedIDs: Set<UUID>
     @State private var hoveredHint: String?
 
     init(
         job: MeetingJob,
-        queue: MeetingQueue,
-        codexAvailable: Bool,
+        model: MeetingsViewModel,
+        providerAvailable: Bool,
         selectedIDs: Binding<Set<UUID>>
     ) {
         self.job = job
-        self.queue = queue
-        self.codexAvailable = codexAvailable
+        self.model = model
+        self.providerAvailable = providerAvailable
         _selectedIDs = selectedIDs
     }
 
@@ -44,7 +44,7 @@ struct MeetingJobView: View {
                         .state == .done ?
                         (job.output?.summary?.deletingPathExtension()
                             .lastPathComponent ?? job
-                            .stage) : job.stage))
+                            .stage.title) : job.stage.title))
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -62,8 +62,8 @@ struct MeetingJobView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             HStack(spacing: 8) {
-                if job.canSummarize, codexAvailable {
-                    Button { queue.summarize(job.id) } label: {
+                if job.canSummarize, providerAvailable {
+                    Button { model.summarize(job.id) } label: {
                         Label {
                             Text("Summarize")
                         } icon: {
@@ -94,10 +94,10 @@ struct MeetingJobView: View {
                     ))
                 }
                 if job.state == .failed || job.state == .cancelled,
-                   job.output == nil || codexAvailable
+                   job.output == nil || providerAvailable
                 {
                     Button(job.retryTitle, systemImage: "arrow.clockwise.circle.fill") {
-                        queue.retry(job.id)
+                        model.retry(job.id)
                     }
                     .buttonStyle(JobActionButtonStyle(
                         hint: job.retryTitle,
@@ -105,7 +105,7 @@ struct MeetingJobView: View {
                     ))
                 }
                 Button("Убрать из списка", systemImage: "xmark.circle.fill") {
-                    queue.remove(job.id)
+                    model.remove(job.id)
                 }
                 .buttonStyle(JobActionButtonStyle(
                     hint: job.state == .running || job
@@ -142,7 +142,7 @@ struct MeetingJobView: View {
         .accessibilityAddTraits(.isButton)
         .accessibilityAddTraits(selectedIDs.contains(job.id) ? .isSelected : [])
         .accessibilityActions {
-            if codexAvailable, job.canSelectForSummary {
+            if providerAvailable, job.canSelectForSummary {
                 Button(selectedIDs
                     .contains(job.id) ? "Снять выделение" :
                     "Выбрать для общей суммаризации")
@@ -165,24 +165,24 @@ struct MeetingJobView: View {
                     }
                 }
             }
-            if job.canSummarize, codexAvailable {
-                Button("Суммаризировать") { queue.summarize(job.id) }
+            if job.canSummarize, providerAvailable {
+                Button("Суммаризировать") { model.summarize(job.id) }
             }
             if job.state == .running || job.state == .waiting {
-                Button("Отменить") { queue.cancel(job.id) }
-                    .disabled(job.stage == "Отмена…")
+                Button("Отменить") { model.cancel(job.id) }
+                    .disabled(job.stage == .cancelling)
             }
             if job.state == .failed || job.state == .cancelled,
-               job.output == nil || codexAvailable
+               job.output == nil || providerAvailable
             {
-                Button(job.retryTitle) { queue.retry(job.id) }
+                Button(job.retryTitle) { model.retry(job.id) }
             }
-            Button("Убрать из списка") { queue.remove(job.id) }
+            Button("Убрать из списка") { model.remove(job.id) }
         }
     }
 
     private func toggleSelection() {
-        guard codexAvailable, job.canSelectForSummary else { return }
+        guard providerAvailable, job.canSelectForSummary else { return }
         if selectedIDs.contains(job.id) {
             selectedIDs.remove(job.id)
         } else {

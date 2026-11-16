@@ -24,7 +24,7 @@ actor ModelStore {
         }
         let directory = try await prepareModel(update)
         try Task.checkCancellation()
-        await update(.stage("Загрузка модели…"))
+        await update(.stage(.loadingModel))
         let loaded = try GigaAMRecognizer(configuration: .init(modelDirectory: directory))
         try Task.checkCancellation()
         recognizer = loaded
@@ -80,11 +80,11 @@ actor ModelStore {
         )
         .appendingPathComponent("Srez/Models/GigaAM-v3-MLX", isDirectory: true)
         try fm.createDirectory(at: directory, withIntermediateDirectories: true)
-        await update(.stage("Проверка модели…"))
+        await update(.stage(.checkingModel))
         for (index, file) in files.enumerated() {
             try await installFile(named: file.0, checksum: file.1, in: directory) { url in
                 await update(
-                    .stage("Скачивание модели: файл \(index + 1) из \(files.count)…")
+                    .stage(.downloadingModel(file: index + 1, total: files.count))
                 )
                 return try await URLSession.shared.download(from: url)
             }

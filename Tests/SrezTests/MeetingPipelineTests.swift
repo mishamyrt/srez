@@ -69,7 +69,7 @@ final class MeetingPipelineTests: XCTestCase {
             let output = try await TranscriptionService().run(
                 input: directory.appendingPathComponent("Запись.mp3"), settings: settings, transcript: text
             ) { event in
-                if case .stage(let stage) = event { XCTAssertFalse(stage.contains("Суммаризация")) }
+                if case .stage(let stage) = event { XCTAssertNotEqual(stage, .composingSummary) }
             }
             XCTAssertNil(output.summary)
             XCTAssertEqual(output.file, output.transcript)

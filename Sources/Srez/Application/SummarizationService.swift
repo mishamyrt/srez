@@ -40,7 +40,7 @@ struct SummarizationService: Sendable {
                 try Task.checkCancellation()
                 await update(
                     .stage(
-                        "Извлечение фактов: часть \(index + 1) из \(extractionGroups.count)…"
+                        .extractingFacts(part: index + 1, total: extractionGroups.count)
                     )
                 )
                 let extracted: MeetingNotes = try await requestSummary(
@@ -61,7 +61,7 @@ struct SummarizationService: Sendable {
             for (index, group) in groups.enumerated() {
                 try Task.checkCancellation()
                 await update(
-                    .stage("Сжатие фактов: часть \(index + 1) из \(groups.count)…")
+                    .stage(.reducingFacts(part: index + 1, total: groups.count))
                 )
                 let merged: MeetingNotes = try await requestSummary(
                     group, partial: true,
@@ -85,7 +85,7 @@ struct SummarizationService: Sendable {
             else { throw Self.summarySizeError }
             notes = reduced
         }
-        await update(.stage("Определение типа и сборка протокола…"))
+        await update(.stage(.composingSummary))
         let summary: MeetingSummary
         if notes.isEmpty {
             summary = try await requestSummary(
@@ -108,7 +108,7 @@ struct SummarizationService: Sendable {
             )
         }
         try Task.checkCancellation()
-        await update(.stage("Сохранение…"))
+        await update(.stage(.savingSummary))
         return try MeetingFileStore.save(
             summary,
             transcript: output.transcript,

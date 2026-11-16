@@ -32,7 +32,7 @@ struct TranscriptionService: Sendable {
                     message: "Не найден встроенный ffmpeg. Пересоберите или переустановите Srez."
                 )
             }
-            await update(.stage("Преобразование в WAV…"))
+            await update(.stage(.convertingAudio))
             let wav = work.appendingPathComponent("audio.wav")
             try await ProcessRunner.run(settings.ffmpeg, arguments: [
                 "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", input.path,
@@ -40,7 +40,7 @@ struct TranscriptionService: Sendable {
                 wav.path,
             ], directory: work)
             let recognizer = try await modelStore.load(update: update)
-            await update(.stage("Распознавание речи…"))
+            await update(.stage(.recognizing))
             text = try await recognizer.transcribe(url: wav) { value in
                 await update(.progress(value))
             }.text
@@ -53,7 +53,7 @@ struct TranscriptionService: Sendable {
         }
 
         try Task.checkCancellation()
-        await update(.stage("Сохранение расшифровки…"))
+        await update(.stage(.savingTranscript))
         let file = try MeetingFileStore.saveFile(
             text,
             title: input.deletingPathExtension().lastPathComponent,

@@ -10,14 +10,14 @@ struct SrezApp: App {
 
     var body: some Scene {
         Window("Srez", id: "meetings") {
-            MeetingsView(queue: delegate.queue)
+            MeetingsView(model: delegate.model)
         }
         .defaultSize(width: 420, height: 550)
         .windowStyle(.hiddenTitleBar)
         .windowToolbarStyle(.unifiedCompact)
         .commands {
             CommandGroup(replacing: .newItem) {
-                Button("Открыть запись…") { delegate.queue.chooseFiles() }
+                Button("Открыть запись…") { delegate.model.chooseFiles() }
                     .keyboardShortcut("o")
             }
         }

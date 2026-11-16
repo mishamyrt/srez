@@ -3,13 +3,13 @@ import Combine
 
 @MainActor
 final class MeetingsDelegate: NSObject, NSApplicationDelegate {
-    let queue = MeetingQueue()
+    let model = MeetingsViewModel(coordinator: MeetingCoordinator())
     private var mainWindow: NSWindow?
     private var jobsObservation: AnyCancellable?
 
     func applicationDidFinishLaunching(_: Notification) {
         mainWindow = NSApp.windows.first { $0.title == "Srez" }
-        jobsObservation = queue.$jobs.map(\.isEmpty).removeDuplicates()
+        jobsObservation = model.$jobs.map(\.isEmpty).removeDuplicates()
             .sink { [weak self] isEmpty in
                 if isEmpty {
                     self?.mainWindow?.orderOut(nil)
@@ -22,14 +22,14 @@ final class MeetingsDelegate: NSObject, NSApplicationDelegate {
         // Finder's open event arrives during launch; let it suppress the initial picker.
         Task {
             try? await Task.sleep(for: .milliseconds(350))
-            if queue.jobs.isEmpty {
-                queue.chooseFiles()
+            if await model.coordinator.snapshot().jobs.isEmpty {
+                model.chooseFiles()
             }
         }
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
-        queue.enqueue(urls)
+        model.enqueue(urls)
         application.activate(ignoringOtherApps: true)
         mainWindow?.makeKeyAndOrderFront(nil)
     }
@@ -38,12 +38,14 @@ final class MeetingsDelegate: NSObject, NSApplicationDelegate {
         _: NSApplication,
         hasVisibleWindows _: Bool
     ) -> Bool {
-        if queue.jobs.isEmpty {
-            queue.chooseFiles()
-            return false
+        Task {
+            if await model.coordinator.snapshot().jobs.isEmpty {
+                model.chooseFiles()
+            } else {
+                mainWindow?.makeKeyAndOrderFront(nil)
+            }
         }
-        mainWindow?.makeKeyAndOrderFront(nil)
-        return true
+        return false
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_: NSApplication) -> Bool {
@@ -53,25 +55,20 @@ final class MeetingsDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication
         .TerminateReply
     {
-        guard queue.hasPendingJobs || queue.jobs
-            .contains(where: { $0.transcript != nil }) else { return .terminateNow }
-        let alert = NSAlert()
-        alert.messageText = "Закрыть приложение?"
-        alert.informativeText = "Обработка будет остановлена. Очередь и расшифровки, для которых не удалось сохранить результат, не сохраняются после выхода."
-        alert.addButton(withTitle: "Продолжить работу")
-        alert.addButton(withTitle: "Выйти")
-        guard alert.runModal() == .alertSecondButtonReturn
-        else { return .terminateCancel }
-        queue.cancelCombination()
-        for job in queue.jobs where job.state == .waiting {
-            queue.cancel(job.id)
-        }
-        for job in queue.jobs where job.state == .running {
-            queue.cancel(job.id)
-        }
         Task {
-            while queue.hasPendingJobs {
-                try? await Task.sleep(for: .milliseconds(100))
+            let snapshot = await model.coordinator.snapshot()
+            if snapshot.hasPendingJobs || snapshot.hasUnsavedTranscripts {
+                let alert = NSAlert()
+                alert.messageText = "Закрыть приложение?"
+                alert.informativeText = "Обработка будет остановлена. Очередь и расшифровки, для которых не удалось сохранить результат, не сохраняются после выхода."
+                alert.addButton(withTitle: "Продолжить работу")
+                alert.addButton(withTitle: "Выйти")
+                guard alert.runModal() == .alertSecondButtonReturn else {
+                    sender.reply(toApplicationShouldTerminate: false)
+                    return
+                }
+                await model.coordinator.cancelAll()
+                await model.coordinator.waitUntilIdle()
             }
             sender.reply(toApplicationShouldTerminate: true)
         }

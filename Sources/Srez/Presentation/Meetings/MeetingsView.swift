@@ -2,33 +2,24 @@ import AppKit
 import SwiftUI
 
 struct MeetingsView: View {
-    @ObservedObject private var queue: MeetingQueue
-    @AppStorage("outputDirectory") private var outputDirectory = ""
-    @AppStorage("codexPath") private var codexPath = ""
-    @State private var codexAvailable = false
+    @ObservedObject private var model: MeetingsViewModel
     @State private var isScrolled = false
     @State private var isOutputHovered = false
-    @State private var selectedIDs: Set<UUID> = []
-    @State private var summaryError: String?
 
-    init(queue: MeetingQueue) {
-        self.queue = queue
-    }
-
-    private var selectableIDs: Set<UUID> {
-        Set(queue.jobs.filter(\.canSelectForSummary).map(\.id))
+    init(model: MeetingsViewModel) {
+        self.model = model
     }
 
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(queue.jobs) { job in
-                        MeetingJobView(
+                    ForEach(model.jobs) { job in
+                        MeetingRowView(
                             job: job,
-                            queue: queue,
-                            codexAvailable: codexAvailable,
-                            selectedIDs: $selectedIDs
+                            model: model,
+                            providerAvailable: model.providerAvailable,
+                            selectedIDs: $model.selectedIDs
                         )
                     }
                 }
@@ -48,30 +39,22 @@ struct MeetingsView: View {
                 }
             }
             Divider()
-            if !selectedIDs.isEmpty {
+            if !model.selectedIDs.isEmpty {
                 HStack {
-                    Text("Выбрано: \(selectedIDs.count)")
+                    Text("Выбрано: \(model.selectedIDs.count)")
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
                     Spacer()
-                    Button(queue.combining ? "Объединение…" : "Суммаризировать вместе") {
-                        let ids = selectedIDs
-                        Task {
-                            do {
-                                try await queue.summarizeTogether(ids)
-                                selectedIDs.subtract(ids)
-                            } catch is CancellationError {
-                            } catch {
-                                summaryError = error.localizedDescription
-                            }
-                        }
+                    Button(model.combining ? "Объединение…" : "Суммаризировать вместе") {
+                        model.summarizeTogether()
                     }
-                    .disabled(selectedIDs.count < 2 || !codexAvailable || queue.combining)
+                    .disabled(model.selectedIDs.count < 2 || !model
+                        .providerAvailable || model.combining)
                     .help(
                         "Объединить расшифровки в порядке списка и создать общий конспект"
                     )
                     Button("Снять выделение", systemImage: "xmark") {
-                        selectedIDs.removeAll()
+                        model.selectedIDs.removeAll()
                     }
                     .labelStyle(.iconOnly)
                     .buttonStyle(.plain)
@@ -82,32 +65,16 @@ struct MeetingsView: View {
                 Divider()
             }
             HStack {
-                Text((outputDirectory as NSString).abbreviatingWithTildeInPath)
+                Text((model.outputDirectory as NSString).abbreviatingWithTildeInPath)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                    .help(outputDirectory)
+                    .help(model.outputDirectory)
                     .textSelection(.enabled)
                 Spacer()
                 Button("Выбрать папку результатов", systemImage: "folder") {
-                    let panel = NSOpenPanel()
-                    panel.title = "Выберите папку результатов"
-                    panel.canChooseDirectories = true
-                    panel.canChooseFiles = false
-                    panel.canCreateDirectories = true
-                    panel.prompt = "Выбрать"
-                    if !outputDirectory.isEmpty {
-                        panel
-                            .directoryURL =
-                            URL(fileURLWithPath: (outputDirectory as NSString)
-                                    .expandingTildeInPath)
-                    }
-                    if panel.runModal() == .OK,
-                       let url = panel.url
-                    {
-                        outputDirectory = url.path
-                    }
+                    model.chooseOutputDirectory()
                 }
                 .labelStyle(.iconOnly)
                 .buttonStyle(.plain)
@@ -130,28 +97,24 @@ struct MeetingsView: View {
         .dropDestination(for: URL.self) { urls, _ in
             let files = urls.filter(\.isFileURL)
             guard !files.isEmpty else { return false }
-            queue.enqueue(files)
+            model.enqueue(files)
             return true
-        }
-        .task(id: codexPath) {
-            codexAvailable = MeetingSettings.isCodexAvailable(at: codexPath)
         }
         .onReceive(NotificationCenter.default
             .publisher(for: NSApplication.didBecomeActiveNotification))
         { _ in
-            codexAvailable = MeetingSettings.isCodexAvailable(at: codexPath)
+            model.refreshSettings()
         }
-        .onChange(of: selectableIDs) { _, ids in selectedIDs.formIntersection(ids) }
         .alert("Не удалось объединить расшифровки", isPresented: Binding(
-            get: { summaryError != nil }, set: {
+            get: { model.summaryError != nil }, set: {
                 if !$0 {
-                    summaryError = nil
+                    model.summaryError = nil
                 }
             }
         )) {
-            Button("ОК", role: .cancel) { summaryError = nil }
+            Button("ОК", role: .cancel) { model.summaryError = nil }
         } message: {
-            Text(summaryError ?? "")
+            Text(model.summaryError ?? "")
         }
         .toolbarBackground(Color(nsColor: .windowBackgroundColor), for: .windowToolbar)
         .toolbarBackground(.visible, for: .windowToolbar)
@@ -169,8 +132,8 @@ struct MeetingsView: View {
     private var windowActions: some ToolbarContent {
         ToolbarItem(placement: .primaryAction) {
             HStack(spacing: 6) {
-                Button("Открыть запись…", systemImage: "document") { queue.chooseFiles() }
-                    .disabled(queue.pickerPresented)
+                Button("Открыть запись…", systemImage: "document") { model.chooseFiles() }
+                    .disabled(model.pickerPresented)
                     .help("Открыть запись… (⌘O)")
                 SettingsLink {
                     Label("Настройки", systemImage: "gearshape")
