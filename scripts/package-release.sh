@@ -13,6 +13,11 @@ fi
 
 app="$PWD/.build/Srez.app"
 test -x "$app/Contents/MacOS/Srez"
+version=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$app/Contents/Info.plist")
+if [[ "$version" != "${tag#v}" ]]; then
+    echo "App version $version does not match release tag $tag. Rebuild with VERSION=${tag#v}." >&2
+    exit 1
+fi
 work=$(mktemp -d "$RUNNER_TEMP/srez-signing.XXXXXX")
 keychain="$work/signing.keychain-db"
 cleanup() {
@@ -37,9 +42,6 @@ if [[ ! "$identity" =~ ^[0-9A-Fa-f]{40}$ ]]; then
     echo "Certificate must contain exactly one code-signing identity with a private key." >&2
     exit 1
 fi
-version="${tag#v}"
-/usr/libexec/PlistBuddy -c "Set CFBundleShortVersionString $version" "$app/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c "Set CFBundleVersion $version" "$app/Contents/Info.plist"
 codesign --force --sign "$identity" --keychain "$keychain" --timestamp=none "$app/Contents/MacOS/ffmpeg"
 codesign --force --sign "$identity" --keychain "$keychain" --timestamp=none "$app"
 codesign --verify --deep --strict "$app"

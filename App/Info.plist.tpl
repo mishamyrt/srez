@@ -6,8 +6,8 @@
     <key>CFBundleName</key><string>Srez</string>
     <key>CFBundleDisplayName</key><string>Srez</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>1.0</string>
-    <key>CFBundleVersion</key><string>1</string>
+    <key>CFBundleShortVersionString</key><string>{%APP_VERSION%}</string>
+    <key>CFBundleVersion</key><string>{%APP_BUILD%}</string>
     <key>NSHumanReadableCopyright</key><string>Includes FFmpeg, licensed under LGPL 2.1 or later. Sources and build instructions: Contents/Resources/FFmpeg.</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>NSHighResolutionCapable</key><true/>

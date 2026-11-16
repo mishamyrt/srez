@@ -18,10 +18,17 @@ jobs:
       env:
         RELEASE_TAG: ${{ github.ref_name }}
       run: '[[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]'
-    - name: Install SwiftLint
-      run: brew install swiftlint
+    - name: Install tools
+      run: brew install swiftlint git-cliff
+    - name: Test release tooling
+      run: make test-release
     - name: Build app
-      run: make build
+      run: |
+        if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+          make build VERSION="${GITHUB_REF_NAME#v}" VERSION_BUNDLE="$GITHUB_RUN_NUMBER"
+        else
+          make build
+        fi
     - name: Run tests
       run: make test
     - name: Lint
@@ -59,6 +66,15 @@ jobs:
       with:
         name: release-macos-arm64
         path: .build/release
+    - name: Extract release notes
+      env:
+        RELEASE_TAG: ${{ github.ref_name }}
+      run: |
+        awk -v header="## [${RELEASE_TAG#v}]" '
+          /^## \[/ { if (found) exit; found = index($0, header) == 1 }
+          found { print }
+          END { if (!found) exit 1 }
+        ' CHANGELOG.md > .build/release/release-notes.md
     - name: Publish GitHub Release
       uses: softprops/action-gh-release@v3.0.3
       with:
@@ -66,7 +82,7 @@ jobs:
           .build/release/*.zip
           .build/release/sha256sums.txt
         fail_on_unmatched_files: true
-        generate_release_notes: true
+        body_path: .build/release/release-notes.md
     - name: Checkout Homebrew tap
       uses: actions/checkout@v7
       with:

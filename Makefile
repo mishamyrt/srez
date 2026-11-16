@@ -1,14 +1,30 @@
 .DEFAULT_GOAL := build
-.PHONY: help build test app app-test clean
+.PHONY: help build test app app-test clean publish test-release App/Info.plist
+
+VERSION := 1.0.0
+VERSION_BUNDLE := 1
+export VERSION VERSION_BUNDLE
 
 help:
 	@echo "Srez"
 	@echo "  make build       build .build/Srez.app for this Mac (default)"
 	@echo "  make test        run app and engine tests"
+	@echo "  make publish     generate changelog, commit and push a release tag"
 	@echo "  make clean       remove build artifacts"
 
-build:
+App/Info.plist: App/Info.plist.tpl
+	@bash -c '[[ "$$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$$ && "$$VERSION_BUNDLE" =~ ^[1-9][0-9]*$$ ]]' || { echo "Expected VERSION=X.Y.Z and a positive VERSION_BUNDLE." >&2; exit 1; }
+	@sed -e "s/{%APP_VERSION%}/$$VERSION/g" -e "s/{%APP_BUILD%}/$$VERSION_BUNDLE/g" "$<" > "$@"
+	@plutil -lint "$@" > /dev/null
+
+build: App/Info.plist
 	bash scripts/build-app.sh
+
+publish:
+	bash scripts/publish.sh
+
+test-release:
+	bash scripts/test-release.sh
 
 test:
 	xcodebuild test -scheme Srez \
