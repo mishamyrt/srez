@@ -247,17 +247,21 @@ final class MeetingPipelineTests: XCTestCase {
             XCTAssertTrue(error.localizedDescription.contains("deliberate-error"))
             XCTAssertTrue(error.localizedDescription.contains("7"))
         }
-        let task = Task {
-            try await MeetingPipeline.runProcess(URL(fileURLWithPath: "/bin/sleep"),
-                                                  arguments: ["30"], directory: directory)
+        let tasks = (0..<2).map { _ in
+            Task {
+                try await MeetingPipeline.runProcess(URL(fileURLWithPath: "/bin/sleep"),
+                                                      arguments: ["30"], directory: directory)
+            }
         }
         try await Task.sleep(for: .milliseconds(200))
         let start = Date()
-        task.cancel()
-        do {
-            try await task.value
-            XCTFail("Expected cancellation")
-        } catch { XCTAssertTrue(error is CancellationError) }
+        for task in tasks { task.cancel() }
+        for task in tasks {
+            do {
+                try await task.value
+                XCTFail("Expected cancellation")
+            } catch { XCTAssertTrue(error is CancellationError) }
+        }
         XCTAssertLessThan(Date().timeIntervalSince(start), 3)
     }
 

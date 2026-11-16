@@ -262,7 +262,8 @@ enum MeetingPipeline {
                         try? await Task.sleep(for: .milliseconds(50))
                     }
                     if process.isRunning { kill(process.processIdentifier, SIGKILL) }
-                    process.waitUntilExit()
+                    // isRunning already reflects termination; waitUntilExit can block on Foundation's run loop.
+                    while process.isRunning { try? await Task.sleep(for: .milliseconds(50)) }
                 }.value
             }
             throw error
