@@ -20,6 +20,11 @@ struct MeetingError: LocalizedError {
 }
 
 enum MeetingPipeline {
+    static let summaryPromptLimit = 96 * 1024
+    private static let summarySizeError = MeetingError(
+        message: "Не удалось уместить факты в лимит запроса. Разбейте запись или выберите меньше встреч."
+    )
+
     static func run(
         input: URL, settings: MeetingSettings, transcript: String? = nil, modelStore: ModelStore = ModelStore(),
         update: @escaping @Sendable (MeetingEvent) async -> Void
@@ -104,28 +109,56 @@ enum MeetingPipeline {
             }
         }
         let sources = sourceGroups.flatMap { $0 }
-        let encoder = JSONEncoder()
+        let extractionGroups = try sourceGroups.enumerated().flatMap { index, group in
+            let context = index > 0 ? Array(sourceGroups[index - 1].suffix(1)) : []
+            return try summaryInputGroups(context + group, partial: true)
+        }
+        var needsExtraction = extractionGroups.count > 1
+        if !needsExtraction {
+            needsExtraction = try summaryPrompt(sources, partial: false).utf8.count > summaryPromptLimit
+        }
         var notes: [MeetingNotes] = []
-        if parts.count > 1 {
-            for (index, group) in sourceGroups.enumerated() {
+        if needsExtraction {
+            for (index, input) in extractionGroups.enumerated() {
                 try Task.checkCancellation()
-                await update(.stage("Извлечение фактов: часть \(index + 1) из \(parts.count)…"))
-                // Carry the preceding fragment so questions and commitments can cross a part boundary.
-                let context = index > 0 ? Array(sourceGroups[index - 1].suffix(1)) : []
-                let input = context + group
-                let data = String(decoding: try encoder.encode(input), as: UTF8.self)
+                await update(.stage("Извлечение фактов: часть \(index + 1) из \(extractionGroups.count)…"))
                 let extracted: MeetingNotes = try await requestSummary(
-                    data, settings: settings, directory: work, partial: true
+                    input, settings: settings, directory: work, partial: true
                 )
                 try extracted.validate(sources: input)
                 notes.append(extracted)
             }
         }
+        while !notes.isEmpty {
+            let before = try summaryPrompt(notes, partial: false, merging: true).utf8.count
+            if before <= summaryPromptLimit { break }
+            let groups = try summaryInputGroups(notes, partial: true, merging: true)
+            var reduced: [MeetingNotes] = []
+            for (index, group) in groups.enumerated() {
+                try Task.checkCancellation()
+                await update(.stage("Сжатие фактов: часть \(index + 1) из \(groups.count)…"))
+                let merged: MeetingNotes = try await requestSummary(
+                    group, settings: settings, directory: work, partial: true, merging: true
+                )
+                try merged.validate(sources: sources)
+                let allowed = group.reduce(into: Set<String>()) { $0.formUnion($1.sourceIDs) }
+                guard merged.sourceIDs.isSubset(of: allowed) else {
+                    throw MeetingError(message: "Codex сослался на источник вне объединяемых фактов. Повторите суммаризацию.")
+                }
+                reduced.append(merged)
+            }
+            let after = try summaryPrompt(reduced, partial: false, merging: true).utf8.count
+            // Stop repeated CLI calls when the model cannot make enough room.
+            guard after <= summaryPromptLimit || after <= before * 3 / 4 else { throw summarySizeError }
+            notes = reduced
+        }
         await update(.stage("Определение типа и сборка протокола…"))
-        let data = try notes.isEmpty ? encoder.encode(sources) : encoder.encode(notes)
-        let summary: MeetingSummary = try await requestSummary(
-            String(decoding: data, as: UTF8.self), settings: settings, directory: work, merging: !notes.isEmpty
-        )
+        let summary: MeetingSummary
+        if notes.isEmpty {
+            summary = try await requestSummary(sources, settings: settings, directory: work)
+        } else {
+            summary = try await requestSummary(notes, settings: settings, directory: work, merging: true)
+        }
         try summary.validate(sources: sources)
         if !notes.isEmpty, !summary.sourceIDs.isSubset(of: notes.reduce(into: Set<String>()) { $0.formUnion($1.sourceIDs) }) {
             throw MeetingError(message: "Codex сослался на источник вне извлечённых фактов. Повторите суммаризацию.")
@@ -151,15 +184,48 @@ enum MeetingPipeline {
         return parts
     }
 
-    private static func requestSummary<Result: Decodable>(
-        _ data: String, settings: MeetingSettings, directory: URL, partial: Bool = false, merging: Bool = false
+    static func summaryPrompt<Value: Encodable>(
+        _ values: [Value], partial: Bool, merging: Bool = false
+    ) throws -> String {
+        let data = String(decoding: try JSONEncoder().encode(values), as: UTF8.self)
+        return MeetingSummaryFormat.prompt(data: data, partial: partial, merging: merging)
+    }
+
+    static func summaryInputGroups<Value: Encodable>(
+        _ values: [Value], partial: Bool, merging: Bool = false
+    ) throws -> [[Value]] {
+        let overhead = try summaryPrompt([Value](), partial: partial, merging: merging).utf8.count
+        var groups: [[Value]] = []
+        var group: [Value] = []
+        var size = overhead
+        let encoder = JSONEncoder()
+        for value in values {
+            try Task.checkCancellation()
+            let bytes = try encoder.encode(value).count
+            guard overhead + bytes <= summaryPromptLimit else { throw summarySizeError }
+            let separator = group.isEmpty ? 0 : 1
+            if size + bytes + separator > summaryPromptLimit {
+                groups.append(group)
+                group = []
+                size = overhead
+            }
+            size += bytes + (group.isEmpty ? 0 : 1)
+            group.append(value)
+        }
+        if !group.isEmpty { groups.append(group) }
+        return groups
+    }
+
+    private static func requestSummary<Input: Encodable, Result: Decodable>(
+        _ input: [Input], settings: MeetingSettings, directory: URL, partial: Bool = false, merging: Bool = false
     ) async throws -> Result {
+        let instruction = try summaryPrompt(input, partial: partial, merging: merging)
+        guard instruction.utf8.count <= summaryPromptLimit else { throw summarySizeError }
         let schema = directory.appendingPathComponent("schema.json")
         try MeetingSummaryFormat.schema(partial: partial).write(to: schema)
         let prompt = directory.appendingPathComponent("prompt.txt")
         let result = directory.appendingPathComponent("summary.json")
         try? FileManager.default.removeItem(at: result)
-        let instruction = MeetingSummaryFormat.prompt(data: data, partial: partial, merging: merging)
         try Data(instruction.utf8).write(to: prompt)
         var arguments = [
             "exec", "--skip-git-repo-check", "--ephemeral", "--ignore-user-config",

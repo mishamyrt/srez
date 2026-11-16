@@ -90,6 +90,68 @@ final class MeetingPipelineTests: XCTestCase {
         XCTAssertEqual(MeetingPipeline.splitTranscript(" я ", limit: 1).joined(), " я ")
     }
 
+    func testSummaryGroupsBoundUTF8EscapingAndInstructions() throws {
+        let sources = (0..<12).map { index in
+            TranscriptSource(id: "s\(index)", text: String(repeating: "👩‍👩‍👧‍👦\\\"\n", count: 600))
+        }
+        for partial in [true, false] {
+            let groups = try MeetingPipeline.summaryInputGroups(sources, partial: partial)
+            XCTAssertGreaterThan(groups.count, 1)
+            XCTAssertEqual(groups.flatMap { $0 }.map(\.id), sources.map(\.id))
+            for group in groups {
+                XCTAssertLessThanOrEqual(try MeetingPipeline.summaryPrompt(group, partial: partial).utf8.count,
+                                         MeetingPipeline.summaryPromptLimit)
+            }
+        }
+        let oversized = TranscriptSource(id: "huge", text: String(repeating: "я", count: MeetingPipeline.summaryPromptLimit))
+        XCTAssertThrowsError(try MeetingPipeline.summaryInputGroups([oversized], partial: true))
+    }
+
+    func testOversizedFactsAreReducedWithBoundedRequestsAndEvidenceChecks() async throws {
+        let big = ["p1s1", "p2s1"].map { id in
+            MeetingNotes(topics: [.init(title: "Тема", kind: .general, details: [
+                .init(kind: .fact, text: String(repeating: "Факт. ", count: 6_000), sourceIDs: [id])
+            ])])
+        }
+        let small = ["p1s1", "p2s1"].map { id in
+            MeetingNotes(topics: [.init(title: "Тема", kind: .general, details: [
+                .init(kind: .fact, text: "Факт.", sourceIDs: [id])
+            ])])
+        }
+        let summary = MeetingSummary(title: "Тема", meetingType: .general,
+                                     summary: [.init(text: "Факт.", sourceIDs: ["p1s1", "p2s1"])])
+        let encoder = JSONEncoder()
+        let cases: [([MeetingNotes], String?, Int)] = [
+            (small, nil, 5), (big, "лимит запроса", 4), ([small[1]], "вне объединяемых фактов", 3)
+        ]
+        for (reductions, expectedError, calls) in cases {
+            let directory = try temporaryDirectory()
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let responses = try (big + reductions).map { try encoder.encode($0) } + [encoder.encode(summary)]
+            let settings = try codexSettings(in: directory, responses: responses)
+            let transcript = String(repeating: "Факт. ", count: 5_000)
+            let output = try await MeetingPipeline.run(input: directory.appendingPathComponent("meeting.wav"),
+                                                       settings: settings, transcript: transcript, update: { _ in })
+            do {
+                let result = try await MeetingPipeline.summarize(output, settings: settings, update: { _ in })
+                XCTAssertNil(expectedError)
+                XCTAssertNotNil(result.summary)
+            } catch {
+                XCTAssertNotNil(expectedError)
+                XCTAssertTrue(error.localizedDescription.contains(expectedError ?? "unexpected success case error"))
+                XCTAssertFalse(try FileManager.default.contentsOfDirectory(atPath: directory.path).contains { $0.hasSuffix(".md") })
+            }
+            XCTAssertEqual(try String(contentsOf: output.transcript), transcript)
+            XCTAssertEqual(try String(contentsOf: directory.appendingPathComponent("calls")), "\(calls)\n")
+            for call in 1...calls {
+                let request = try Data(contentsOf: directory.appendingPathComponent("request-\(call).txt"))
+                XCTAssertLessThanOrEqual(request.count, MeetingPipeline.summaryPromptLimit)
+            }
+            let merge = try JSONDecoder().decode([MeetingNotes].self, from: requestData(in: directory, call: 3))
+            XCTAssertEqual(merge.first?.sourceIDs, Set(["p1s1"]))
+        }
+    }
+
     func testSummarizesSavedTranscriptAndPassesModel() async throws {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
