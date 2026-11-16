@@ -8,14 +8,14 @@ final class SummaryProviderTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
         let settings = MeetingSettings(outputDirectory: directory, ffmpeg: directory.appendingPathComponent("missing"),
                                        codex: directory.appendingPathComponent("missing"), codexModel: "", codexReasoning: "medium")
-        let output = try await MeetingPipeline.run(input: directory.appendingPathComponent("meeting.wav"),
+        let output = try await TranscriptionService().run(input: directory.appendingPathComponent("meeting.wav"),
                                                    settings: settings, transcript: "Исходная речь.", update: { _ in })
         for id in ["p1s1", "unknown"] {
             let summary = MeetingSummary(title: "Тема", meetingType: .general,
                                          summary: [.init(text: "Итог встречи.", sourceIDs: [id])])
             let provider = StubProvider(response: try JSONEncoder().encode(summary))
             do {
-                let result = try await MeetingPipeline.summarize(output, settings: settings, provider: provider, update: { _ in })
+                let result = try await summarize(output, settings: settings, provider: provider, update: { _ in })
                 XCTAssertEqual(id, "p1s1")
                 XCTAssertNotNil(result.summary)
             } catch {

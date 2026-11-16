@@ -53,7 +53,7 @@ final class MeetingPipelineTests: XCTestCase {
         let second = try MeetingFileStore.save(summary, transcript: transcript, directory: directory)
         XCTAssertEqual(second.summary?.lastPathComponent, "План релиз осень (2).md")
         XCTAssertEqual(try String(contentsOf: first.transcript), "исходный текст")
-        XCTAssertEqual(try String(contentsOf: XCTUnwrap(first.summary)), summary.markdown + "\n")
+        XCTAssertEqual(try String(contentsOf: XCTUnwrap(first.summary)), MeetingMarkdownRenderer.render(summary) + "\n")
         XCTAssertEqual(MeetingFileStore.fileStem("../\n:/"), "Встреча")
         XCTAssertLessThanOrEqual(MeetingFileStore.fileStem(String(repeating: "🧑🏽‍💻", count: 100)).utf8.count, 180)
     }
@@ -66,7 +66,7 @@ final class MeetingPipelineTests: XCTestCase {
             codex: directory.appendingPathComponent("missing-codex"), codexModel: "", codexReasoning: "medium"
         )
         for (index, text) in ["исходный текст", "вторая запись"].enumerated() {
-            let output = try await MeetingPipeline.run(
+            let output = try await TranscriptionService().run(
                 input: directory.appendingPathComponent("Запись.mp3"), settings: settings, transcript: text
             ) { event in
                 if case .stage(let stage) = event { XCTAssertFalse(stage.contains("Суммаризация")) }
@@ -83,11 +83,11 @@ final class MeetingPipelineTests: XCTestCase {
     func testLongTranscriptSplitsWithoutLosingText() {
         for text in [String(repeating: "Обсудили выпуск. Ответственный — Миша.\n", count: 2_000),
                      String(repeating: "я", count: 50_001), " пробел", ""] {
-            let parts = MeetingPipeline.splitTranscript(text)
+            let parts = SummarizationService.splitTranscript(text)
             XCTAssertEqual(parts.joined(), text)
             XCTAssertTrue(parts.allSatisfy { $0.count <= 24_000 })
         }
-        XCTAssertEqual(MeetingPipeline.splitTranscript(" я ", limit: 1).joined(), " я ")
+        XCTAssertEqual(SummarizationService.splitTranscript(" я ", limit: 1).joined(), " я ")
     }
 
     func testSummaryGroupsBoundUTF8EscapingAndInstructions() throws {
@@ -95,16 +95,16 @@ final class MeetingPipelineTests: XCTestCase {
             TranscriptSource(id: "s\(index)", text: String(repeating: "👩‍👩‍👧‍👦\\\"\n", count: 600))
         }
         for partial in [true, false] {
-            let groups = try MeetingPipeline.summaryInputGroups(sources, partial: partial)
+            let groups = try SummarizationService.summaryInputGroups(sources, partial: partial)
             XCTAssertGreaterThan(groups.count, 1)
             XCTAssertEqual(groups.flatMap { $0 }.map(\.id), sources.map(\.id))
             for group in groups {
-                XCTAssertLessThanOrEqual(try MeetingPipeline.summaryPrompt(group, partial: partial).utf8.count,
-                                         MeetingPipeline.summaryPromptLimit)
+                XCTAssertLessThanOrEqual(try SummarizationService.summaryPrompt(group, partial: partial).utf8.count,
+                                         SummarizationService.summaryPromptLimit)
             }
         }
-        let oversized = TranscriptSource(id: "huge", text: String(repeating: "я", count: MeetingPipeline.summaryPromptLimit))
-        XCTAssertThrowsError(try MeetingPipeline.summaryInputGroups([oversized], partial: true))
+        let oversized = TranscriptSource(id: "huge", text: String(repeating: "я", count: SummarizationService.summaryPromptLimit))
+        XCTAssertThrowsError(try SummarizationService.summaryInputGroups([oversized], partial: true))
     }
 
     func testOversizedFactsAreReducedWithBoundedRequestsAndEvidenceChecks() async throws {
@@ -130,10 +130,10 @@ final class MeetingPipelineTests: XCTestCase {
             let responses = try (big + reductions).map { try encoder.encode($0) } + [encoder.encode(summary)]
             let settings = try codexSettings(in: directory, responses: responses)
             let transcript = String(repeating: "Факт. ", count: 5_000)
-            let output = try await MeetingPipeline.run(input: directory.appendingPathComponent("meeting.wav"),
+            let output = try await TranscriptionService().run(input: directory.appendingPathComponent("meeting.wav"),
                                                        settings: settings, transcript: transcript, update: { _ in })
             do {
-                let result = try await MeetingPipeline.summarize(output, settings: settings, update: { _ in })
+                let result = try await summarize(output, settings: settings, update: { _ in })
                 XCTAssertNil(expectedError)
                 XCTAssertNotNil(result.summary)
             } catch {
@@ -145,7 +145,7 @@ final class MeetingPipelineTests: XCTestCase {
             XCTAssertEqual(try String(contentsOf: directory.appendingPathComponent("calls")), "\(calls)\n")
             for call in 1...calls {
                 let request = try Data(contentsOf: directory.appendingPathComponent("request-\(call).txt"))
-                XCTAssertLessThanOrEqual(request.count, MeetingPipeline.summaryPromptLimit)
+                XCTAssertLessThanOrEqual(request.count, SummarizationService.summaryPromptLimit)
             }
             let merge = try JSONDecoder().decode([MeetingNotes].self, from: requestData(in: directory, call: 3))
             XCTAssertEqual(merge.first?.sourceIDs, Set(["p1s1"]))
@@ -169,12 +169,12 @@ final class MeetingPipelineTests: XCTestCase {
         let settings = try codexSettings(in: directory, responses: notes.map { try encoder.encode($0) }
                                         + [try encoder.encode(summary)])
         let transcript = String(repeating: "Обсудили выпуск. ", count: 2_000)
-        let transcription = try await MeetingPipeline.run(
+        let transcription = try await TranscriptionService().run(
             input: directory.appendingPathComponent("missing-audio.wav"),
             settings: settings, transcript: transcript, update: { _ in }
         )
         XCTAssertNil(transcription.summary)
-        let output = try await MeetingPipeline.summarize(transcription, settings: settings, update: { _ in })
+        let output = try await summarize(transcription, settings: settings, update: { _ in })
         XCTAssertEqual(output.transcript, transcription.transcript)
         XCTAssertEqual(try String(contentsOf: output.transcript), transcript)
         XCTAssertTrue(try String(contentsOf: XCTUnwrap(output.summary)).contains("Обсудили выпуск"))
@@ -203,11 +203,11 @@ final class MeetingPipelineTests: XCTestCase {
             ])
         ])
         let settings = try codexSettings(in: directory, responses: [JSONEncoder().encode(summary)])
-        let output = try await MeetingPipeline.run(
+        let output = try await TranscriptionService().run(
             input: directory.appendingPathComponent("meeting.wav"), settings: settings,
             transcript: "Слишком много параллельных задач.", update: { _ in }
         )
-        let result = try await MeetingPipeline.summarize(output, settings: settings, update: { _ in })
+        let result = try await summarize(output, settings: settings, update: { _ in })
         let markdown = try String(contentsOf: XCTUnwrap(result.summary))
         XCTAssertFalse(markdown.contains("Тип встречи:"))
         XCTAssertTrue(markdown.contains("## Обсуждавшиеся вопросы"))
@@ -230,12 +230,12 @@ final class MeetingPipelineTests: XCTestCase {
             let directory = try temporaryDirectory()
             defer { try? FileManager.default.removeItem(at: directory) }
             let settings = try codexSettings(in: directory, responses: [Data(response.utf8)])
-            let output = try await MeetingPipeline.run(
+            let output = try await TranscriptionService().run(
                 input: directory.appendingPathComponent("meeting.wav"), settings: settings,
                 transcript: "Исходный текст.", update: { _ in }
             )
             do {
-                _ = try await MeetingPipeline.summarize(output, settings: settings, update: { _ in })
+                _ = try await summarize(output, settings: settings, update: { _ in })
                 XCTFail("Expected invalid summary to fail")
             } catch { XCTAssertTrue(error is MeetingError) }
             XCTAssertEqual(try String(contentsOf: output.transcript), "Исходный текст.")
@@ -255,12 +255,12 @@ final class MeetingPipelineTests: XCTestCase {
         let settings = try codexSettings(in: directory, responses: [
             encoder.encode(notes), encoder.encode(MeetingNotes()), encoder.encode(summary)
         ])
-        let output = try await MeetingPipeline.run(
+        let output = try await TranscriptionService().run(
             input: directory.appendingPathComponent("meeting.wav"), settings: settings,
             transcript: String(repeating: "Факт. ", count: 5_000), update: { _ in }
         )
         do {
-            _ = try await MeetingPipeline.summarize(output, settings: settings, update: { _ in })
+            _ = try await summarize(output, settings: settings, update: { _ in })
             XCTFail("Expected source outside extracted facts to fail")
         } catch { XCTAssertTrue(error.localizedDescription.contains("вне извлечённых")) }
     }
@@ -270,12 +270,12 @@ final class MeetingPipelineTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
         let invalid = MeetingNotes(actions: [.init(text: "Проверить.", sourceIDs: ["p2s1"])])
         let settings = try codexSettings(in: directory, responses: [JSONEncoder().encode(invalid)])
-        let output = try await MeetingPipeline.run(
+        let output = try await TranscriptionService().run(
             input: directory.appendingPathComponent("meeting.wav"), settings: settings,
             transcript: String(repeating: "Факт. ", count: 5_000), update: { _ in }
         )
         do {
-            _ = try await MeetingPipeline.summarize(output, settings: settings, update: { _ in })
+            _ = try await summarize(output, settings: settings, update: { _ in })
             XCTFail("Expected facts citing a different part to fail")
         } catch { XCTAssertTrue(error.localizedDescription.contains("источника")) }
         XCTAssertEqual(try String(contentsOf: directory.appendingPathComponent("calls")), "1\n")
@@ -286,12 +286,12 @@ final class MeetingPipelineTests: XCTestCase {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let settings = try codexSettings(in: directory, responses: [])
-        let output = try await MeetingPipeline.run(
+        let output = try await TranscriptionService().run(
             input: directory.appendingPathComponent("meeting.wav"), settings: settings,
             transcript: " \n ", update: { _ in }
         )
         do {
-            _ = try await MeetingPipeline.summarize(output, settings: settings, update: { _ in })
+            _ = try await summarize(output, settings: settings, update: { _ in })
             XCTFail("Expected a blank transcript to fail")
         } catch { XCTAssertTrue(error.localizedDescription.contains("Расшифровка пуста")) }
         XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("calls").path))

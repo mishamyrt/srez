@@ -68,7 +68,7 @@ final class MeetingSettingsTests: XCTestCase {
         let broken = try MeetingSettings.current(bundle: movedBundle)
         XCTAssertEqual(broken.ffmpeg, moved.ffmpeg)
         do {
-            _ = try await MeetingPipeline.run(
+            _ = try await TranscriptionService().run(
                 input: directory.appendingPathComponent("recording.mp3"), settings: broken, update: { _ in }
             )
             XCTFail("Expected the missing bundled executable to fail")

@@ -157,17 +157,17 @@ final class MeetingQueue: ObservableObject {
                 await self.receive(event, for: job.id)
             }
             if let output = job.output {
-                return try await MeetingPipeline.summarize(
+                return try await SummarizationService(provider: SummaryProviderFactory
+                    .make(settings.get().provider)).summarize(
                     output,
-                    settings: settings.get(),
+                    directory: settings.get().outputDirectory,
                     update: update
                 )
             }
-            return try await MeetingPipeline.run(
+            return try await TranscriptionService(modelStore: modelStore).run(
                 input: job.input,
                 settings: settings.get(),
                 transcript: job.transcript,
-                modelStore: modelStore,
                 update: update
             )
         }

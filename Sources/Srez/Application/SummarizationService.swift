@@ -1,98 +1,38 @@
 import Foundation
-import GigaAM
 
-enum MeetingPipeline {
+struct SummarizationService: Sendable {
+    let provider: any SummaryProvider
+
     static let summaryPromptLimit = 96 * 1024
     private static let summarySizeError = MeetingError(
         message: "Не удалось уместить факты в лимит запроса. Разбейте запись или выберите меньше встреч."
     )
 
-    static func run(
-        input: URL, settings: MeetingSettings, transcript: String? = nil,
-        modelStore: ModelStore = ModelStore(),
+    func summarize(
+        _ output: MeetingOutput, directory: URL,
         update: @escaping @Sendable (MeetingEvent) async -> Void
     ) async throws -> MeetingOutput {
-        let fm = FileManager.default
-        try MeetingFileStore.prepareOutputDirectory(settings.outputDirectory)
-        let work = fm.temporaryDirectory
-            .appendingPathComponent("GigaAM-\(UUID().uuidString)")
-        try fm.createDirectory(
-            at: work,
-            withIntermediateDirectories: true,
-            attributes: [.posixPermissions: 0o700]
-        )
-        defer { try? fm.removeItem(at: work) }
-
-        let text: String
-        if let transcript {
-            text = transcript
-        } else {
-            guard fm.isExecutableFile(atPath: settings.ffmpeg.path) else {
-                throw MeetingError(
-                    message: "Не найден встроенный ffmpeg. Пересоберите или переустановите Srez."
-                )
-            }
-            await update(.stage("Преобразование в WAV…"))
-            let wav = work.appendingPathComponent("audio.wav")
-            try await ProcessRunner.run(settings.ffmpeg, arguments: [
-                "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", input.path,
-                "-map", "0:a:0", "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le",
-                wav.path,
-            ], directory: work)
-            let recognizer = try await modelStore.load(update: update)
-            await update(.stage("Распознавание речи…"))
-            text = try await recognizer.transcribe(url: wav) { value in
-                await update(.progress(value))
-            }.text
-            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-                throw MeetingError(
-                    message: "Речь не распознана. Проверьте, что в файле есть русская речь."
-                )
-            }
-            await update(.transcript(text))
-        }
-
-        try Task.checkCancellation()
-        await update(.stage("Сохранение расшифровки…"))
-        let file = try MeetingFileStore.saveFile(
-            text,
-            title: input.deletingPathExtension().lastPathComponent,
-            extension: "raw.txt",
-            directory: settings.outputDirectory
-        )
-        return MeetingOutput(transcript: file)
-    }
-
-    static func summarize(
-        _ output: MeetingOutput, settings: MeetingSettings,
-        provider: (any SummaryProvider)? = nil,
-        update: @escaping @Sendable (MeetingEvent) async -> Void
-    ) async throws -> MeetingOutput {
-        let provider = provider ?? SummaryProviderFactory.make(.codex(.init(
-            executable: settings.codex, model: settings.codexModel,
-            reasoning: settings.codexReasoning
-        )))
-        try MeetingFileStore.prepareOutputDirectory(settings.outputDirectory)
+        try MeetingFileStore.prepareOutputDirectory(directory)
         try Task.checkCancellation()
         let text = try String(contentsOf: output.transcript, encoding: .utf8)
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw MeetingError(message: "Расшифровка пуста. Нет текста для суммаризации.")
         }
-        let parts = splitTranscript(text)
+        let parts = Self.splitTranscript(text)
         let sourceGroups = parts.enumerated().map { part, text in
-            splitTranscript(text, limit: 1200).enumerated().map { index, fragment in
+            Self.splitTranscript(text, limit: 1200).enumerated().map { index, fragment in
                 TranscriptSource(id: "p\(part + 1)s\(index + 1)", text: fragment)
             }
         }
         let sources = sourceGroups.flatMap(\.self)
         let extractionGroups = try sourceGroups.enumerated().flatMap { index, group in
             let context = index > 0 ? Array(sourceGroups[index - 1].suffix(1)) : []
-            return try summaryInputGroups(context + group, partial: true)
+            return try Self.summaryInputGroups(context + group, partial: true)
         }
         var needsExtraction = extractionGroups.count > 1
         if !needsExtraction {
-            needsExtraction = try summaryPrompt(sources, partial: false).utf8
-                .count > summaryPromptLimit
+            needsExtraction = try Self.summaryPrompt(sources, partial: false).utf8
+                .count > Self.summaryPromptLimit
         }
         var notes: [MeetingNotes] = []
         if needsExtraction {
@@ -104,19 +44,19 @@ enum MeetingPipeline {
                     )
                 )
                 let extracted: MeetingNotes = try await requestSummary(
-                    input, provider: provider, partial: true
+                    input, partial: true
                 )
-                try extracted.validate(sources: input)
+                try SummaryValidator.validate(extracted, sources: input)
                 notes.append(extracted)
             }
         }
         while !notes.isEmpty {
-            let before = try summaryPrompt(notes, partial: false, merging: true).utf8
+            let before = try Self.summaryPrompt(notes, partial: false, merging: true).utf8
                 .count
-            if before <= summaryPromptLimit {
+            if before <= Self.summaryPromptLimit {
                 break
             }
-            let groups = try summaryInputGroups(notes, partial: true, merging: true)
+            let groups = try Self.summaryInputGroups(notes, partial: true, merging: true)
             var reduced: [MeetingNotes] = []
             for (index, group) in groups.enumerated() {
                 try Task.checkCancellation()
@@ -124,10 +64,10 @@ enum MeetingPipeline {
                     .stage("Сжатие фактов: часть \(index + 1) из \(groups.count)…")
                 )
                 let merged: MeetingNotes = try await requestSummary(
-                    group, provider: provider, partial: true,
+                    group, partial: true,
                     merging: true
                 )
-                try merged.validate(sources: sources)
+                try SummaryValidator.validate(merged, sources: sources)
                 let allowed = group
                     .reduce(into: Set<String>()) { $0.formUnion($1.sourceIDs) }
                 guard merged.sourceIDs.isSubset(of: allowed) else {
@@ -137,28 +77,27 @@ enum MeetingPipeline {
                 }
                 reduced.append(merged)
             }
-            let after = try summaryPrompt(reduced, partial: false, merging: true).utf8
+            let after = try Self.summaryPrompt(reduced, partial: false, merging: true)
+                .utf8
                 .count
             // Stop repeated CLI calls when the model cannot make enough room.
-            guard after <= summaryPromptLimit || after <= before * 3 / 4
-            else { throw summarySizeError }
+            guard after <= Self.summaryPromptLimit || after <= before * 3 / 4
+            else { throw Self.summarySizeError }
             notes = reduced
         }
         await update(.stage("Определение типа и сборка протокола…"))
         let summary: MeetingSummary
         if notes.isEmpty {
             summary = try await requestSummary(
-                sources,
-                provider: provider
+                sources
             )
         } else {
             summary = try await requestSummary(
                 notes,
-                provider: provider,
                 merging: true
             )
         }
-        try summary.validate(sources: sources)
+        try SummaryValidator.validate(summary, sources: sources)
         if !notes.isEmpty,
            !summary.sourceIDs
                .isSubset(of: notes
@@ -173,7 +112,7 @@ enum MeetingPipeline {
         return try MeetingFileStore.save(
             summary,
             transcript: output.transcript,
-            directory: settings.outputDirectory
+            directory: directory
         )
     }
 
@@ -227,8 +166,12 @@ enum MeetingPipeline {
     static func summaryInputGroups<Value: Encodable>(
         _ values: [Value], partial: Bool, merging: Bool = false
     ) throws -> [[Value]] {
-        let overhead = try summaryPrompt([Value](), partial: partial, merging: merging)
-            .utf8.count
+        let overhead = try Self.summaryPrompt(
+            [Value](),
+            partial: partial,
+            merging: merging
+        )
+        .utf8.count
         var groups: [[Value]] = []
         var group: [Value] = []
         var size = overhead
@@ -236,9 +179,10 @@ enum MeetingPipeline {
         for value in values {
             try Task.checkCancellation()
             let bytes = try encoder.encode(value).count
-            guard overhead + bytes <= summaryPromptLimit else { throw summarySizeError }
+            guard overhead + bytes <= Self.summaryPromptLimit
+            else { throw Self.summarySizeError }
             let separator = group.isEmpty ? 0 : 1
-            if size + bytes + separator > summaryPromptLimit {
+            if size + bytes + separator > Self.summaryPromptLimit {
                 groups.append(group)
                 group = []
                 size = overhead
@@ -252,13 +196,13 @@ enum MeetingPipeline {
         return groups
     }
 
-    private static func requestSummary<Result: Decodable>(
-        _ input: [some Encodable], provider: any SummaryProvider,
+    private func requestSummary<Result: Decodable>(
+        _ input: [some Encodable],
         partial: Bool = false, merging: Bool = false
     ) async throws -> Result {
-        let request = try summaryRequest(input, partial: partial, merging: merging)
-        guard try request.prompt.utf8.count <= summaryPromptLimit
-        else { throw summarySizeError }
+        let request = try Self.summaryRequest(input, partial: partial, merging: merging)
+        guard try request.prompt.utf8.count <= Self.summaryPromptLimit
+        else { throw Self.summarySizeError }
         let data = try await provider.generate(request)
         do {
             return try JSONDecoder().decode(Result.self, from: data)

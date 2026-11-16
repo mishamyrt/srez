@@ -18,8 +18,8 @@ final class MeetingSummaryTests: XCTestCase {
                 .init(kind: .answer, text: "Каждый день.", sourceIDs: ["p1s1"])
             ])
         ], actions: [.init(text: "Проверить поиск.", owner: "Миша", due: "к пятнице", sourceIDs: ["p1s1"])])
-        try summary.validate(sources: sources)
-        let markdown = summary.markdown
+        try SummaryValidator.validate(summary, sources: sources)
+        let markdown = MeetingMarkdownRenderer.render(summary)
         XCTAssertFalse(markdown.contains("Тип встречи:"))
         XCTAssertTrue(markdown.contains("**Цитата:** «Долго ищу отчёт.»"))
         XCTAssertTrue(markdown.contains("**Ответ (Миша):** Ответ участника."))
@@ -44,8 +44,8 @@ final class MeetingSummaryTests: XCTestCase {
             actions: [.init(text: "Провести проверку.", dependencies: ["Тестовый стенд."], sourceIDs: ["p1s1"])],
             openQuestions: [.init(text: "Когда готов стенд?", needed: "Уточнить доступность.",
                                   owner: "Миша", sourceIDs: ["p1s1"])])
-        try summary.validate(sources: sources)
-        let markdown = summary.markdown
+        try SummaryValidator.validate(summary, sources: sources)
+        let markdown = MeetingMarkdownRenderer.render(summary)
         for expected in ["## Решения", "**Условия:** После проверки.", "**Обоснование:** Устраняет блокер.",
                          "## Задачи", "**Ответственный:** не определён", "**Срок:** не указан",
                          "**Зависимости:** Тестовый стенд.", "## Открытые вопросы",
@@ -64,11 +64,11 @@ final class MeetingSummaryTests: XCTestCase {
                 ])
             ])
             let decoded = try JSONDecoder().decode(MeetingSummary.self, from: JSONEncoder().encode(summary))
-            try decoded.validate(sources: sources)
+            try SummaryValidator.validate(decoded, sources: sources)
             XCTAssertEqual(decoded.meetingType, type)
-            XCTAssertFalse(decoded.markdown.contains("Тип встречи:"))
-            XCTAssertTrue(decoded.markdown.hasPrefix("# Тема\n\n## Обсуждавшиеся вопросы"))
-            XCTAssertTrue(decoded.markdown.contains("Содержание."))
+            XCTAssertFalse(MeetingMarkdownRenderer.render(decoded).contains("Тип встречи:"))
+            XCTAssertTrue(MeetingMarkdownRenderer.render(decoded).hasPrefix("# Тема\n\n## Обсуждавшиеся вопросы"))
+            XCTAssertTrue(MeetingMarkdownRenderer.render(decoded).contains("Содержание."))
         }
     }
 
@@ -76,15 +76,14 @@ final class MeetingSummaryTests: XCTestCase {
         for ids in [[], ["missing"], ["p1s1", "missing"]] as [[String]] {
             let invalid = MeetingSummary(title: "Тема", meetingType: .general,
                                          summary: [.init(text: "Содержание.", sourceIDs: ids)])
-            XCTAssertThrowsError(try invalid.validate(sources: sources))
+            XCTAssertThrowsError(try SummaryValidator.validate(invalid, sources: sources))
         }
-        XCTAssertThrowsError(try MeetingSummary(title: "Тема", meetingType: .general).validate(sources: sources))
-        XCTAssertThrowsError(try MeetingSummary(title: " ", meetingType: .general,
-            actions: [.init(text: "Проверить.", sourceIDs: ["p1s1"])])
-            .validate(sources: sources))
+        XCTAssertThrowsError(try SummaryValidator.validate(MeetingSummary(title: "Тема", meetingType: .general), sources: sources))
+        XCTAssertThrowsError(try SummaryValidator.validate(MeetingSummary(title: " ", meetingType: .general,
+            actions: [.init(text: "Проверить.", sourceIDs: ["p1s1"])]), sources: sources))
         let invalid = MeetingNotes(topics: [.init(title: "Тема", kind: .general, details: [])])
-        XCTAssertThrowsError(try invalid.validate(sources: sources))
-        XCTAssertNoThrow(try MeetingNotes().validate(sources: sources))
+        XCTAssertThrowsError(try SummaryValidator.validate(invalid, sources: sources))
+        XCTAssertNoThrow(try SummaryValidator.validate(MeetingNotes(), sources: sources))
     }
 
     func testQuotesMustMatchCitedContiguousSourceText() {
@@ -96,17 +95,17 @@ final class MeetingSummaryTests: XCTestCase {
         let fragments = [TranscriptSource(id: "1", text: "Долго "),
                          TranscriptSource(id: "2", text: "ищу "),
                          TranscriptSource(id: "3", text: "отчёт.")]
-        XCTAssertNoThrow(try notes("Долго ищу отчёт.", ids: ["1", "2", "3"]).validate(sources: fragments))
-        XCTAssertThrowsError(try notes("Долго отчёт.", ids: ["1", "3"]).validate(sources: fragments))
-        XCTAssertThrowsError(try notes("Долго ищу отчёт.", ids: ["1"]).validate(sources: fragments))
-        XCTAssertThrowsError(try notes("Быстро нахожу отчёт.", ids: ["1", "2", "3"]).validate(sources: fragments))
+        XCTAssertNoThrow(try SummaryValidator.validate(notes("Долго ищу отчёт.", ids: ["1", "2", "3"]), sources: fragments))
+        XCTAssertThrowsError(try SummaryValidator.validate(notes("Долго отчёт.", ids: ["1", "3"]), sources: fragments))
+        XCTAssertThrowsError(try SummaryValidator.validate(notes("Долго ищу отчёт.", ids: ["1"]), sources: fragments))
+        XCTAssertThrowsError(try SummaryValidator.validate(notes("Быстро нахожу отчёт.", ids: ["1", "2", "3"]), sources: fragments))
     }
 
     func testModelTextCannotCreateAdditionalMarkdownSections() throws {
         let summary = MeetingSummary(title: "Тема\n## Решения", meetingType: .general,
             summary: [.init(text: "Факт\n\n## Задачи\n<script> *жирный* [ссылка](url)", sourceIDs: ["p1s1"])])
-        try summary.validate(sources: sources)
-        let markdown = summary.markdown
+        try SummaryValidator.validate(summary, sources: sources)
+        let markdown = MeetingMarkdownRenderer.render(summary)
         XCTAssertFalse(markdown.contains("\n## Решения"))
         XCTAssertFalse(markdown.contains("\n## Задачи"))
         XCTAssertFalse(markdown.contains("<script>"))

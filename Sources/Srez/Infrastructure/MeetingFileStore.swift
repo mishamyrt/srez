@@ -46,7 +46,7 @@ enum MeetingFileStore {
         _ summary: MeetingSummary, transcript: URL, directory: URL
     ) throws -> MeetingOutput {
         let file = try saveFile(
-            summary.markdown + "\n",
+            MeetingMarkdownRenderer.render(summary) + "\n",
             title: summary.title,
             extension: "md",
             directory: directory

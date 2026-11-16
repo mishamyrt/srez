@@ -20,6 +20,10 @@ struct MeetingSettings: Sendable {
     let codexModel: String
     let codexReasoning: String
 
+    var provider: ProviderConfiguration {
+        .codex(.init(executable: codex, model: codexModel, reasoning: codexReasoning))
+    }
+
     static func isCodexAvailable(at path: String) -> Bool {
         let path = path.trimmingCharacters(in: .whitespacesAndNewlines).expandingTilde
         guard !path.isEmpty else { return false }
