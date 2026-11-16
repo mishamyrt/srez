@@ -51,7 +51,8 @@ public final class GigaAMTensorStore: @unchecked Sendable {
 
         let loaded = try SafetensorsMLXLoader.loadTensor(
             url: weightsURL,
-            tensorName: name
+            tensorName: name,
+            index: index
         )
 
         if cache {

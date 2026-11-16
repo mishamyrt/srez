@@ -12,9 +12,10 @@ public struct MLXTensorLoadResult {
 public enum SafetensorsMLXLoader {
     public static func loadTensor(
         url: URL,
-        tensorName: String
+        tensorName: String,
+        index: SafetensorsIndex? = nil
     ) throws -> MLXTensorLoadResult {
-        let index = try SafetensorsIndex.loadHeader(url: url)
+        let index = try index ?? SafetensorsIndex.loadHeader(url: url)
 
         guard let tensor = index.tensors.first(where: { $0.name == tensorName }) else {
             let prefix = index.tensors.prefix(20).map(\.name).joined(separator: "\n  ")
