@@ -9,7 +9,7 @@ final class MeetingCoordinatorTests: XCTestCase {
         let restore = configure(directory, cli: URL(fileURLWithPath: "/usr/bin/false"))
         defer { restore() }
         let originals = try jobs(in: directory, texts: ["Первая.", "Вторая."])
-        let queue = MeetingCoordinator(jobs: originals) { outputs, directory in
+        let queue = makeCoordinator(jobs: originals) { outputs, directory in
             XCTAssertFalse(Thread.isMainThread)
             Thread.sleep(forTimeInterval: 0.3)
             return try MeetingFileStore.combineTranscripts(outputs, directory: directory)
@@ -46,11 +46,11 @@ final class MeetingCoordinatorTests: XCTestCase {
         originals[1].output?.summary = existing
         var ineligible = originals
         ineligible[1].state = .failed
-        let other = MeetingCoordinator(jobs: ineligible)
+        let other = makeCoordinator(jobs: ineligible)
         try await other.summarizeTogether(Set(ineligible.prefix(2).map(\.id)))
         let otherSnapshot = await other.snapshot()
         XCTAssertEqual(otherSnapshot.jobs.count, 3)
-        let queue = MeetingCoordinator(jobs: originals)
+        let queue = makeCoordinator(jobs: originals)
         let ids = Set(originals.prefix(2).map(\.id))
         try await queue.summarizeTogether([])
         try await queue.summarizeTogether([originals[0].id])
@@ -101,7 +101,7 @@ final class MeetingCoordinatorTests: XCTestCase {
         var nextRecording = MeetingJob(input: directory.appendingPathComponent("next.mp3"))
         nextRecording.transcript = "Следующая запись."
         originals = [recording, nextRecording] + originals
-        let queue = MeetingCoordinator(jobs: originals)
+        let queue = makeCoordinator(jobs: originals)
         await queue.retry(recording.id)
         await queue.summarize(originals[2].id)
         await queue.summarize(originals[3].id)
@@ -149,7 +149,7 @@ final class MeetingCoordinatorTests: XCTestCase {
         originals[1].state = .waiting
         var completed = MeetingJob(input: directory.appendingPathComponent("completed.mp3"))
         completed.state = .done
-        let queue = MeetingCoordinator(jobs: originals + [completed])
+        let queue = makeCoordinator(jobs: originals + [completed])
         await queue.retry(originals[0].id)
         await queue.remove(originals[0].id)
         try await waitUntil { await queue.snapshot().jobs.first?.state == .running }
@@ -162,7 +162,7 @@ final class MeetingCoordinatorTests: XCTestCase {
         XCTAssertFalse(snapshot.hasPendingJobs)
         XCTAssertEqual(try String(contentsOf: XCTUnwrap(originals[0].output?.transcript)), "Обсудили выпуск.")
         let waiting = MeetingJob(input: directory.appendingPathComponent("waiting.mp3"))
-        let waitingQueue = MeetingCoordinator(jobs: [waiting])
+        let waitingQueue = makeCoordinator(jobs: [waiting])
         await waitingQueue.remove(waiting.id)
         let waitingSnapshot = await waitingQueue.snapshot()
         XCTAssertTrue(waitingSnapshot.jobs.isEmpty)
@@ -180,7 +180,7 @@ final class MeetingCoordinatorTests: XCTestCase {
         var job = MeetingJob(input: directory.appendingPathComponent("recording.mp3"))
         job.state = .failed
         job.transcript = "Обсудили выпуск."
-        let queue = MeetingCoordinator(jobs: [job])
+        let queue = makeCoordinator(jobs: [job])
         await queue.summarize(job.id)
         var snapshot = await queue.snapshot()
         XCTAssertEqual(snapshot.jobs[0].state, .failed)
@@ -215,7 +215,7 @@ final class MeetingCoordinatorTests: XCTestCase {
         let restore = configure(directory, cli: cli)
         defer { restore() }
         let original = try XCTUnwrap(jobs(in: directory, texts: ["Обсудили выпуск."]).first)
-        let queue = MeetingCoordinator(jobs: [original])
+        let queue = makeCoordinator(jobs: [original])
         await queue.summarize(original.id)
         try await waitForQueue(queue)
         var snapshot = await queue.snapshot()
@@ -231,6 +231,54 @@ final class MeetingCoordinatorTests: XCTestCase {
         XCTAssertNil(snapshot.jobs[0].error)
         XCTAssertNotNil(snapshot.jobs[0].output?.summary)
         XCTAssertEqual(snapshot.jobs[0].output?.transcript, original.output?.transcript)
+    }
+
+    func testCoordinatorUsesInjectedProviderAndSnapshotsSettingsPerJob() async throws {
+        let directory = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let originals = try jobs(in: directory, texts: ["Первая запись.", "Вторая запись."])
+        let firstDirectory = directory.appendingPathComponent("first")
+        let secondDirectory = directory.appendingPathComponent("second")
+        let providerConfiguration = ProviderConfiguration.codex(.init(executable: directory.appendingPathComponent("missing-cli"), model: "test", reasoning: "medium"))
+        let source = SnapshotSource(MeetingSettings(outputDirectory: firstDirectory, ffmpeg: directory, provider: providerConfiguration))
+        let summary = MeetingSummary(title: "Протокол", meetingType: .general,
+                                     summary: [.init(text: "Итог.", sourceIDs: ["p1s1"])])
+        let provider = RecordingSummaryProvider(response: try JSONEncoder().encode(summary), pauseFirst: true)
+        let coordinator = MeetingCoordinator(jobs: originals, settings: { _ in await source.current() }, makeProvider: { _ in provider })
+        await coordinator.summarize(originals[0].id)
+        try await waitUntil { await provider.requests.count == 1 }
+        await coordinator.summarize(originals[1].id)
+        await source.set(MeetingSettings(outputDirectory: secondDirectory, ffmpeg: directory, provider: providerConfiguration))
+        await provider.releaseFirst()
+        try await waitForQueue(coordinator)
+        let snapshot = await coordinator.snapshot()
+        XCTAssertEqual(snapshot.jobs.map(\.state), [.done, .done])
+        XCTAssertEqual(snapshot.jobs[0].output?.summary?.deletingLastPathComponent().path, firstDirectory.path)
+        XCTAssertEqual(snapshot.jobs[1].output?.summary?.deletingLastPathComponent().path, secondDirectory.path)
+        let requests = await provider.requests
+        XCTAssertEqual(requests.count, 2)
+    }
+
+    @MainActor
+    func testCancelledIdleWaitDoesNotBlockCoordinator() async throws {
+        let job = MeetingJob(input: URL(fileURLWithPath: "/tmp/waiting.mp3"))
+        let coordinator = makeCoordinator(jobs: [job])
+        let waiter = Task { try await coordinator.waitUntilIdle() }
+        try await Task.sleep(for: .milliseconds(20))
+        waiter.cancel()
+        do { try await waiter.value; XCTFail("Expected cancellation") }
+        catch { XCTAssertTrue(error is CancellationError) }
+        await coordinator.cancelAll()
+        let snapshot = await coordinator.snapshot()
+        XCTAssertFalse(snapshot.hasPendingJobs)
+        XCTAssertEqual(snapshot.jobs.first?.state, .cancelled)
+    }
+
+    private actor SnapshotSource {
+        var value: MeetingSettings
+        init(_ value: MeetingSettings) { self.value = value }
+        func current() -> MeetingSettings { value }
+        func set(_ value: MeetingSettings) { self.value = value }
     }
 
     private func temporaryDirectory() throws -> URL {

@@ -3,6 +3,7 @@ import Foundation
 actor MeetingCoordinator {
     private var jobs: [MeetingJob]
     private let transcription: TranscriptionService
+    private let makeProvider: SummaryProviderBuilder
     private let settings: @Sendable (MeetingJob.Kind) async throws -> MeetingSettings
     private let combine: @Sendable ([MeetingOutput], URL) throws -> MeetingOutput
     private var transcriptionWorker: (id: UUID, task: Task<MeetingOutput, Error>)?
@@ -13,10 +14,8 @@ actor MeetingCoordinator {
     init(
         jobs: [MeetingJob] = [],
         transcription: TranscriptionService = .init(),
-        settings: @escaping @Sendable (MeetingJob.Kind) async throws
-            -> MeetingSettings = {
-                try MeetingSettings.current(summarizing: $0 == .summarization)
-            },
+        settings: @escaping @Sendable (MeetingJob.Kind) async throws -> MeetingSettings,
+        makeProvider: @escaping SummaryProviderBuilder,
         combine: @escaping @Sendable ([MeetingOutput], URL) throws -> MeetingOutput = {
             try MeetingFileStore.combineTranscripts($0, directory: $1)
         }
@@ -24,6 +23,7 @@ actor MeetingCoordinator {
         self.jobs = jobs
         self.transcription = transcription
         self.settings = settings
+        self.makeProvider = makeProvider
         self.combine = combine
     }
 
@@ -160,9 +160,9 @@ actor MeetingCoordinator {
         cancelCombination()
     }
 
-    func waitUntilIdle() async {
+    func waitUntilIdle() async throws {
         while snapshot().hasPendingJobs {
-            try? await Task.sleep(for: .milliseconds(50))
+            try await Task.sleep(for: .milliseconds(50))
         }
     }
 
@@ -180,6 +180,7 @@ actor MeetingCoordinator {
         jobs[index].state = .running
         let settings = settings
         let transcription = transcription
+        let makeProvider = makeProvider
         let task = Task.detached(priority: .userInitiated) { [self] in
             let settings = try await settings(kind)
             try Task.checkCancellation()
@@ -191,15 +192,15 @@ actor MeetingCoordinator {
             case .transcription:
                 return try await transcription.run(
                     input: job.input,
-                    settings: settings,
+                    settings: settings.transcription,
                     transcript: job.transcript,
                     update: update
                 )
             case .summarization:
                 guard let output = job.output
                 else { throw MeetingError(message: "Нет сохранённой расшифровки.") }
-                let service = SummarizationService(provider: SummaryProviderFactory
-                    .make(settings.provider))
+                let service =
+                    SummarizationService(provider: makeProvider(settings.provider))
                 return try await service.summarize(
                     output,
                     directory: settings.outputDirectory,

@@ -14,7 +14,7 @@ struct SummarizationService: Sendable {
     ) async throws -> MeetingOutput {
         try MeetingFileStore.prepareOutputDirectory(directory)
         try Task.checkCancellation()
-        let text = try String(contentsOf: output.transcript, encoding: .utf8)
+        let text = try MeetingFileStore.readTranscript(output.transcript)
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw MeetingError(message: "Расшифровка пуста. Нет текста для суммаризации.")
         }
@@ -72,7 +72,7 @@ struct SummarizationService: Sendable {
                     .reduce(into: Set<String>()) { $0.formUnion($1.sourceIDs) }
                 guard merged.sourceIDs.isSubset(of: allowed) else {
                     throw MeetingError(
-                        message: "Codex сослался на источник вне объединяемых фактов. Повторите суммаризацию."
+                        message: "Провайдер сослался на источник вне объединяемых фактов. Повторите суммаризацию."
                     )
                 }
                 reduced.append(merged)
@@ -104,7 +104,7 @@ struct SummarizationService: Sendable {
                    .reduce(into: Set<String>()) { $0.formUnion($1.sourceIDs) })
         {
             throw MeetingError(
-                message: "Codex сослался на источник вне извлечённых фактов. Повторите суммаризацию."
+                message: "Провайдер сослался на источник вне извлечённых фактов. Повторите суммаризацию."
             )
         }
         try Task.checkCancellation()
@@ -116,7 +116,7 @@ struct SummarizationService: Sendable {
         )
     }
 
-    /// Bound each Codex input for two-hour recordings; split at paragraph/word
+    /// Bound provider prompts for two-hour recordings; split at paragraph/word
     /// boundaries.
     static func splitTranscript(_ text: String, limit: Int = 24000) -> [String] {
         precondition(limit > 0)

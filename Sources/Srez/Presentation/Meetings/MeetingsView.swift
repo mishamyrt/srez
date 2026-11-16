@@ -100,11 +100,6 @@ struct MeetingsView: View {
             model.enqueue(files)
             return true
         }
-        .onReceive(NotificationCenter.default
-            .publisher(for: NSApplication.didBecomeActiveNotification))
-        { _ in
-            model.refreshSettings()
-        }
         .alert("Не удалось объединить расшифровки", isPresented: Binding(
             get: { model.summaryError != nil }, set: {
                 if !$0 {

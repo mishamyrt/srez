@@ -1,7 +1,7 @@
 import XCTest
 @testable import Srez
 
-final class MeetingPipelineTests: XCTestCase {
+final class MeetingProcessingTests: XCTestCase {
     func testCombinesTranscriptsWithoutOverwritingSourcesOrPreviousResults() throws {
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -67,7 +67,7 @@ final class MeetingPipelineTests: XCTestCase {
         )
         for (index, text) in ["исходный текст", "вторая запись"].enumerated() {
             let output = try await TranscriptionService().run(
-                input: directory.appendingPathComponent("Запись.mp3"), settings: settings, transcript: text
+                input: directory.appendingPathComponent("Запись.mp3"), settings: settings.transcription, transcript: text
             ) { event in
                 if case .stage(let stage) = event { XCTAssertNotEqual(stage, .composingSummary) }
             }
@@ -131,7 +131,7 @@ final class MeetingPipelineTests: XCTestCase {
             let settings = try codexSettings(in: directory, responses: responses)
             let transcript = String(repeating: "Факт. ", count: 5_000)
             let output = try await TranscriptionService().run(input: directory.appendingPathComponent("meeting.wav"),
-                                                       settings: settings, transcript: transcript, update: { _ in })
+                                                       settings: settings.transcription, transcript: transcript, update: { _ in })
             do {
                 let result = try await summarize(output, settings: settings, update: { _ in })
                 XCTAssertNil(expectedError)
@@ -171,7 +171,7 @@ final class MeetingPipelineTests: XCTestCase {
         let transcript = String(repeating: "Обсудили выпуск. ", count: 2_000)
         let transcription = try await TranscriptionService().run(
             input: directory.appendingPathComponent("missing-audio.wav"),
-            settings: settings, transcript: transcript, update: { _ in }
+            settings: settings.transcription, transcript: transcript, update: { _ in }
         )
         XCTAssertNil(transcription.summary)
         let output = try await summarize(transcription, settings: settings, update: { _ in })
@@ -204,7 +204,7 @@ final class MeetingPipelineTests: XCTestCase {
         ])
         let settings = try codexSettings(in: directory, responses: [JSONEncoder().encode(summary)])
         let output = try await TranscriptionService().run(
-            input: directory.appendingPathComponent("meeting.wav"), settings: settings,
+            input: directory.appendingPathComponent("meeting.wav"), settings: settings.transcription,
             transcript: "Слишком много параллельных задач.", update: { _ in }
         )
         let result = try await summarize(output, settings: settings, update: { _ in })
@@ -231,7 +231,7 @@ final class MeetingPipelineTests: XCTestCase {
             defer { try? FileManager.default.removeItem(at: directory) }
             let settings = try codexSettings(in: directory, responses: [Data(response.utf8)])
             let output = try await TranscriptionService().run(
-                input: directory.appendingPathComponent("meeting.wav"), settings: settings,
+                input: directory.appendingPathComponent("meeting.wav"), settings: settings.transcription,
                 transcript: "Исходный текст.", update: { _ in }
             )
             do {
@@ -256,7 +256,7 @@ final class MeetingPipelineTests: XCTestCase {
             encoder.encode(notes), encoder.encode(MeetingNotes()), encoder.encode(summary)
         ])
         let output = try await TranscriptionService().run(
-            input: directory.appendingPathComponent("meeting.wav"), settings: settings,
+            input: directory.appendingPathComponent("meeting.wav"), settings: settings.transcription,
             transcript: String(repeating: "Факт. ", count: 5_000), update: { _ in }
         )
         do {
@@ -271,7 +271,7 @@ final class MeetingPipelineTests: XCTestCase {
         let invalid = MeetingNotes(actions: [.init(text: "Проверить.", sourceIDs: ["p2s1"])])
         let settings = try codexSettings(in: directory, responses: [JSONEncoder().encode(invalid)])
         let output = try await TranscriptionService().run(
-            input: directory.appendingPathComponent("meeting.wav"), settings: settings,
+            input: directory.appendingPathComponent("meeting.wav"), settings: settings.transcription,
             transcript: String(repeating: "Факт. ", count: 5_000), update: { _ in }
         )
         do {
@@ -287,7 +287,7 @@ final class MeetingPipelineTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
         let settings = try codexSettings(in: directory, responses: [])
         let output = try await TranscriptionService().run(
-            input: directory.appendingPathComponent("meeting.wav"), settings: settings,
+            input: directory.appendingPathComponent("meeting.wav"), settings: settings.transcription,
             transcript: " \n ", update: { _ in }
         )
         do {

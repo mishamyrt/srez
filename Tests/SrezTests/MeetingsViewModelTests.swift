@@ -10,8 +10,8 @@ final class MeetingsViewModelTests: XCTestCase {
         var second = MeetingJob(input: URL(fileURLWithPath: "/tmp/second.mp3"))
         second.state = .done
         second.output = MeetingOutput(transcript: URL(fileURLWithPath: "/tmp/second.raw.txt"))
-        let coordinator = MeetingCoordinator(jobs: [first, second])
-        var model: MeetingsViewModel? = MeetingsViewModel(coordinator: coordinator)
+        let coordinator = makeCoordinator(jobs: [first, second])
+        var model: MeetingsViewModel? = MeetingsViewModel(coordinator: coordinator, settings: SettingsStore())
         weak var released = model
         for _ in 0..<100 where model?.jobs.count != 2 { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertEqual(model?.jobs.map(\.id), [first.id, second.id])

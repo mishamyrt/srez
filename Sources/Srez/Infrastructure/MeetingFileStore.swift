@@ -1,13 +1,17 @@
 import Foundation
 
 enum MeetingFileStore {
+    static func readTranscript(_ url: URL) throws -> String {
+        try String(contentsOf: url, encoding: .utf8)
+    }
+
     static func combineTranscripts(
         _ outputs: [MeetingOutput],
         directory: URL
     ) throws -> MeetingOutput {
         let texts = try outputs.map { output in
             try Task.checkCancellation()
-            let text = try String(contentsOf: output.transcript, encoding: .utf8)
+            let text = try readTranscript(output.transcript)
             guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 throw MeetingError(
                     message: "Расшифровка «\(output.transcript.lastPathComponent)» пуста. Нет текста для суммаризации."

@@ -3,7 +3,11 @@ import Combine
 
 @MainActor
 final class MeetingsDelegate: NSObject, NSApplicationDelegate {
-    let model = MeetingsViewModel(coordinator: MeetingCoordinator())
+    let dependencies = AppDependencies()
+    private var model: MeetingsViewModel {
+        dependencies.meetings
+    }
+
     private var mainWindow: NSWindow?
     private var jobsObservation: AnyCancellable?
 
@@ -22,10 +26,14 @@ final class MeetingsDelegate: NSObject, NSApplicationDelegate {
         // Finder's open event arrives during launch; let it suppress the initial picker.
         Task {
             try? await Task.sleep(for: .milliseconds(350))
-            if await model.coordinator.snapshot().jobs.isEmpty {
+            if await dependencies.coordinator.snapshot().jobs.isEmpty {
                 model.chooseFiles()
             }
         }
+    }
+
+    func applicationDidBecomeActive(_: Notification) {
+        dependencies.settingsStore.refresh()
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
@@ -39,7 +47,7 @@ final class MeetingsDelegate: NSObject, NSApplicationDelegate {
         hasVisibleWindows _: Bool
     ) -> Bool {
         Task {
-            if await model.coordinator.snapshot().jobs.isEmpty {
+            if await dependencies.coordinator.snapshot().jobs.isEmpty {
                 model.chooseFiles()
             } else {
                 mainWindow?.makeKeyAndOrderFront(nil)
@@ -56,7 +64,7 @@ final class MeetingsDelegate: NSObject, NSApplicationDelegate {
         .TerminateReply
     {
         Task {
-            let snapshot = await model.coordinator.snapshot()
+            let snapshot = await dependencies.coordinator.snapshot()
             if snapshot.hasPendingJobs || snapshot.hasUnsavedTranscripts {
                 let alert = NSAlert()
                 alert.messageText = "Закрыть приложение?"
@@ -67,8 +75,9 @@ final class MeetingsDelegate: NSObject, NSApplicationDelegate {
                     sender.reply(toApplicationShouldTerminate: false)
                     return
                 }
-                await model.coordinator.cancelAll()
-                await model.coordinator.waitUntilIdle()
+                await dependencies.coordinator.cancelAll()
+                do { try await dependencies.coordinator.waitUntilIdle() }
+                catch { sender.reply(toApplicationShouldTerminate: false); return }
             }
             sender.reply(toApplicationShouldTerminate: true)
         }

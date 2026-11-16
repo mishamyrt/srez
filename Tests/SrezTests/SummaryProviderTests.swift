@@ -9,11 +9,11 @@ final class SummaryProviderTests: XCTestCase {
         let settings = MeetingSettings(outputDirectory: directory, ffmpeg: directory.appendingPathComponent("missing"),
                                        codex: directory.appendingPathComponent("missing"), codexModel: "", codexReasoning: "medium")
         let output = try await TranscriptionService().run(input: directory.appendingPathComponent("meeting.wav"),
-                                                   settings: settings, transcript: "Исходная речь.", update: { _ in })
+                                                   settings: settings.transcription, transcript: "Исходная речь.", update: { _ in })
         for id in ["p1s1", "unknown"] {
             let summary = MeetingSummary(title: "Тема", meetingType: .general,
                                          summary: [.init(text: "Итог встречи.", sourceIDs: [id])])
-            let provider = StubProvider(response: try JSONEncoder().encode(summary))
+            let provider = RecordingSummaryProvider(response: try JSONEncoder().encode(summary))
             do {
                 let result = try await summarize(output, settings: settings, provider: provider, update: { _ in })
                 XCTAssertEqual(id, "p1s1")
@@ -33,14 +33,4 @@ final class SummaryProviderTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: output.transcript), "Исходная речь.")
     }
 
-    private actor StubProvider: SummaryProvider {
-        let response: Data
-        var requests: [SummaryRequest] = []
-        init(response: Data) { self.response = response }
-        func generate(_ request: SummaryRequest) async throws -> Data {
-            try Task.checkCancellation()
-            requests.append(request)
-            return response
-        }
-    }
 }

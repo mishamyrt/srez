@@ -25,3 +25,6 @@ protocol SummaryProvider: Sendable {
     /// Returns the result JSON without a transport-specific envelope.
     func generate(_ request: SummaryRequest) async throws -> Data
 }
+
+typealias SummaryProviderBuilder = @Sendable (ProviderConfiguration)
+    -> any SummaryProvider

@@ -11,17 +11,19 @@ final class MeetingsViewModel: ObservableObject {
     @Published private(set) var outputDirectory = ""
     @Published var selectedIDs: Set<UUID> = []
     @Published var summaryError: String?
-    let coordinator: MeetingCoordinator
+    private let coordinator: MeetingCoordinator
     private let dialogs = FileDialogs()
+    private let settings: SettingsStore
     private var observation: Task<Void, Never>?
     private var settingsObservation: AnyCancellable?
 
-    init(coordinator: MeetingCoordinator) {
+    init(coordinator: MeetingCoordinator, settings: SettingsStore) {
         self.coordinator = coordinator
+        self.settings = settings
         refreshSettings()
-        settingsObservation = NotificationCenter.default
-            .publisher(for: UserDefaults.didChangeNotification).sink { [weak self] _ in
-                Task { @MainActor in self?.refreshSettings() }
+        settingsObservation = settings.changes.receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.refreshSettings()
             }
         observation = Task { [weak self, coordinator] in
             for await snapshot in await coordinator.updates() {
@@ -40,9 +42,8 @@ final class MeetingsViewModel: ObservableObject {
     }
 
     func refreshSettings() {
-        outputDirectory = UserDefaults.standard.string(forKey: "outputDirectory") ?? ""
-        providerAvailable = MeetingSettings
-            .isCodexAvailable(at: UserDefaults.standard.string(forKey: "codexPath") ?? "")
+        outputDirectory = settings.string("outputDirectory")
+        providerAvailable = SummaryProviderFactory.isAvailable(settings.provider)
     }
 
     func chooseFiles() {
@@ -63,7 +64,7 @@ final class MeetingsViewModel: ObservableObject {
             directory: true,
             title: "Выберите папку результатов"
         ) {
-            UserDefaults.standard.set(url.path, forKey: "outputDirectory")
+            settings.set(url.path, for: "outputDirectory")
             refreshSettings()
         }
     }

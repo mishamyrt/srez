@@ -25,7 +25,7 @@ final class MeetingSelectionTests: XCTestCase {
                               styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = NSHostingView(rootView: MeetingRowView(
-            job: job, model: MeetingsViewModel(coordinator: MeetingCoordinator()), providerAvailable: true, selectedIDs: selection
+            job: job, model: MeetingsViewModel(coordinator: makeCoordinator(), settings: SettingsStore()), providerAvailable: true, selectedIDs: selection
         ))
         window.makeKeyAndOrderFront(nil)
         defer { window.close() }
