@@ -1,6 +1,6 @@
 import CryptoKit
 import Foundation
-import GigaAMKit
+import GigaAM
 
 actor ModelStore {
     private let prepareModel: @Sendable (@escaping @Sendable (MeetingEvent) async -> Void) async throws -> URL

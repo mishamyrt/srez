@@ -1,6 +1,6 @@
 import AVFoundation
 import XCTest
-@testable import GigaAMKit
+@testable import GigaAM
 
 final class AudioLoaderTests: XCTestCase {
     func testStreamingKeepsSamplesAndMergesShortTail() throws {

@@ -1,5 +1,5 @@
 import XCTest
-@testable import GigaAMKit
+@testable import GigaAM
 
 final class MelSpectrogramTests: XCTestCase {
     func testAcceleratedMelMatchesDirectDFT() throws {

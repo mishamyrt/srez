@@ -14,7 +14,7 @@ test:
 	xcodebuild test -scheme Srez \
 	  -destination 'platform=macOS,arch=arm64' \
 	  -derivedDataPath .build/app-derived -configuration Release ENABLE_TESTABILITY=YES \
-	  -only-testing:SrezTests -only-testing:GigaAMKitTests
+	  -only-testing:SrezTests -only-testing:GigaAMTests
 
 app: build
 

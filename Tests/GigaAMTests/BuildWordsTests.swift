@@ -1,5 +1,5 @@
 import XCTest
-@testable import GigaAMKit
+@testable import GigaAM
 
 /// Tests for `GigaAMProModel.buildWords` — grouping the RNNT emission trace
 /// into timestamped words. Pure function, no model files required.

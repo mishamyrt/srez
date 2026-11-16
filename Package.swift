@@ -19,22 +19,22 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "GigaAMKit",
+            name: "GigaAM",
             dependencies: [
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "MLXNN", package: "mlx-swift"),
                 .product(name: "Numerics", package: "swift-numerics")
             ],
-            path: "Sources/GigaAMKit"
+            path: "Sources/GigaAM"
         ),
         .testTarget(
-            name: "GigaAMKitTests",
-            dependencies: ["GigaAMKit"],
-            path: "Tests/GigaAMKitTests"
+            name: "GigaAMTests",
+            dependencies: ["GigaAM"],
+            path: "Tests/GigaAMTests"
         ),
         .executableTarget(
             name: "Srez",
-            dependencies: ["GigaAMKit"],
+            dependencies: ["GigaAM"],
             resources: [.process("Resources")]
         ),
         .testTarget(

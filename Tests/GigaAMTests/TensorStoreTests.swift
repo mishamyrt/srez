@@ -1,6 +1,6 @@
 import XCTest
 import MLX
-@testable import GigaAMKit
+@testable import GigaAM
 
 final class TensorStoreTests: XCTestCase {
     func testStoreReusesParsedHeaderForUncachedTensors() throws {

@@ -1,5 +1,5 @@
 import Foundation
-import GigaAMKit
+import GigaAM
 import Darwin
 
 struct MeetingOutput: Sendable {
