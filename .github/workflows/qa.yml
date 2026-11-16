@@ -1,7 +1,10 @@
-name: Quality Assurance
+name: Build and Release
 
 on:
   push:
+
+permissions:
+  contents: read
 
 jobs:
   build:
@@ -10,6 +13,11 @@ jobs:
 
     steps:
     - uses: actions/checkout@v7
+    - name: Validate release tag
+      if: startsWith(github.ref, 'refs/tags/v')
+      env:
+        RELEASE_TAG: ${{ github.ref_name }}
+      run: '[[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]'
     - name: Install SwiftLint
       run: brew install swiftlint
     - name: Build app
@@ -18,3 +26,65 @@ jobs:
       run: make test
     - name: Lint
       run: make lint
+    - name: Sign and package app
+      if: startsWith(github.ref, 'refs/tags/v')
+      env:
+        RELEASE_TAG: ${{ github.ref_name }}
+        BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+        P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+      run: bash scripts/package-release.sh "$RELEASE_TAG"
+    - name: Upload release assets
+      if: startsWith(github.ref, 'refs/tags/v')
+      uses: actions/upload-artifact@v7
+      with:
+        name: release-macos-arm64
+        path: .build/release/*
+        include-hidden-files: true
+        if-no-files-found: error
+        retention-days: 7
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: release-homebrew
+      cancel-in-progress: false
+    steps:
+    - uses: actions/checkout@v7
+    - name: Download release assets
+      uses: actions/download-artifact@v8
+      with:
+        name: release-macos-arm64
+        path: .build/release
+    - name: Publish GitHub Release
+      uses: softprops/action-gh-release@v3.0.3
+      with:
+        files: |
+          .build/release/*.zip
+          .build/release/sha256sums.txt
+        fail_on_unmatched_files: true
+        generate_release_notes: true
+    - name: Checkout Homebrew tap
+      uses: actions/checkout@v7
+      with:
+        repository: mishamyrt/homebrew-tap
+        token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        path: homebrew-tap
+    - name: Update Homebrew cask
+      env:
+        RELEASE_TAG: ${{ github.ref_name }}
+      run: |
+        mkdir -p homebrew-tap/Casks
+        bash scripts/generate-cask.sh "$RELEASE_TAG" > homebrew-tap/Casks/srez.rb
+        ruby -c homebrew-tap/Casks/srez.rb
+        cd homebrew-tap
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git add Casks/srez.rb
+        if ! git diff --cached --quiet; then
+          git commit -m "chore(cask): update srez to $RELEASE_TAG"
+          git push
+        fi
