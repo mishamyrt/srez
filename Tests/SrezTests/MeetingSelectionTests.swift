@@ -33,20 +33,7 @@ final class MeetingSelectionTests: XCTestCase {
         let clicks: [(NSEvent.ModifierFlags, Set<UUID>)] = [
             ([], [otherID]), (.command, [otherID, job.id]), (.command, [otherID])
         ]
-        for (index, click) in clicks.enumerated() {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3 + Double(index) * 0.3) {
-                clickTime = Date()
-                latency = nil
-                self.click(window, modifiers: click.0)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    XCTAssertEqual(selectedIDs, click.1)
-                    if click.0.contains(.command) {
-                        XCTAssertLessThan(latency ?? 1, 0.2)
-                    }
-                }
-            }
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.3) {
+        func stop() {
             app.stop(nil)
             app.postEvent(NSEvent.otherEvent(
                 with: .applicationDefined, location: .zero, modifierFlags: [],
@@ -54,6 +41,25 @@ final class MeetingSelectionTests: XCTestCase {
                 subtype: 0, data1: 0, data2: 0
             )!, atStart: false)
         }
+        // Chain clicks so a slow AppKit startup cannot queue them all before their checks.
+        func sendClick(_ index: Int) {
+            let click = clicks[index]
+            clickTime = Date()
+            latency = nil
+            self.click(window, modifiers: click.0)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                XCTAssertEqual(selectedIDs, click.1)
+                if click.0.contains(.command) {
+                    XCTAssertLessThan(latency ?? 1, 0.2)
+                }
+                if index + 1 < clicks.count {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { sendClick(index + 1) }
+                } else {
+                    stop()
+                }
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { sendClick(0) }
         // Bare XCTest does not run AppKit's event loop; gestures need real event dispatch.
         app.run()
     }
