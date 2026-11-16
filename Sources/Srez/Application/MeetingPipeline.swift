@@ -2,27 +2,6 @@ import Darwin
 import Foundation
 import GigaAM
 
-struct MeetingOutput: Sendable {
-    let transcript: URL
-    var summary: URL?
-    var file: URL {
-        summary ?? transcript
-    }
-}
-
-enum MeetingEvent: Sendable {
-    case stage(String)
-    case progress(Double)
-    case transcript(String)
-}
-
-struct MeetingError: LocalizedError {
-    let message: String
-    var errorDescription: String? {
-        message
-    }
-}
-
 enum MeetingPipeline {
     static let summaryPromptLimit = 96 * 1024
     private static let summarySizeError = MeetingError(
