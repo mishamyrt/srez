@@ -21,7 +21,7 @@ struct MeetingError: LocalizedError {
 
 enum MeetingPipeline {
     static func run(
-        input: URL, settings: MeetingSettings, transcript: String? = nil,
+        input: URL, settings: MeetingSettings, transcript: String? = nil, modelStore: ModelStore = ModelStore(),
         update: @escaping @Sendable (MeetingEvent) async -> Void
     ) async throws -> MeetingOutput {
         let fm = FileManager.default
@@ -44,9 +44,11 @@ enum MeetingPipeline {
                 "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", input.path,
                 "-map", "0:a:0", "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", wav.path
             ], directory: work)
-            let model = try await ModelStore.prepare(update: update)
-            await update(.stage("Загрузка модели…"))
-            text = try await recognize(wav, model: model, update: update)
+            let recognizer = try await modelStore.load(update: update)
+            await update(.stage("Распознавание речи…"))
+            text = try await recognizer.transcribe(url: wav) { value in
+                await update(.progress(value))
+            }.text
             guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 throw MeetingError(message: "Речь не распознана. Проверьте, что в файле есть русская речь.")
             }
@@ -129,17 +131,6 @@ enum MeetingPipeline {
         try Task.checkCancellation()
         await update(.stage("Сохранение…"))
         return try save(summary, transcript: output.transcript, directory: settings.outputDirectory)
-    }
-
-    private static func recognize(
-        _ wav: URL, model: URL, update: @escaping @Sendable (MeetingEvent) async -> Void
-    ) async throws -> String {
-        try Task.checkCancellation()
-        let recognizer = try GigaAMRecognizer(configuration: .init(modelDirectory: model))
-        await update(.stage("Распознавание речи…"))
-        return try await recognizer.transcribe(url: wav) { value in
-            await update(.progress(value))
-        }.text
     }
 
     // Bound each Codex input for two-hour recordings; split at paragraph/word boundaries.

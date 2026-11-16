@@ -22,6 +22,7 @@ final class MeetingQueue: ObservableObject {
     @Published var jobs: [MeetingJob] = []
     @Published var pickerPresented = false
     private var filePanel: NSOpenPanel?
+    private let modelStore = ModelStore()
     private var transcriptionWorker: (id: UUID, task: Task<MeetingOutput, Error>)?
     private var summaryWorker: (id: UUID, task: Task<MeetingOutput, Error>)?
     var hasPendingJobs: Bool {
@@ -121,6 +122,7 @@ final class MeetingQueue: ObservableObject {
         let job = jobs[index]
         let settings = Result { try MeetingSettings.current(summarizing: summarizing) }
         jobs[index].state = .running
+        let modelStore = modelStore
         let task = Task.detached(priority: .userInitiated) { [self] in
             let update: @Sendable (MeetingEvent) async -> Void = { event in
                 await self.receive(event, for: job.id)
@@ -129,7 +131,7 @@ final class MeetingQueue: ObservableObject {
                 return try await MeetingPipeline.summarize(output, settings: settings.get(), update: update)
             }
             return try await MeetingPipeline.run(input: job.input, settings: settings.get(),
-                                                 transcript: job.transcript, update: update)
+                                                 transcript: job.transcript, modelStore: modelStore, update: update)
         }
         if summarizing {
             summaryWorker = (job.id, task)
@@ -155,6 +157,9 @@ final class MeetingQueue: ObservableObject {
             if summarizing {
                 summaryWorker = nil
             } else {
+                if !jobs.contains(where: { $0.state == .waiting && $0.output == nil }) {
+                    await modelStore.unload()
+                }
                 transcriptionWorker = nil
             }
             startNext(summarizing: summarizing)

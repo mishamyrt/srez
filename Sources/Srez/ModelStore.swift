@@ -1,7 +1,32 @@
 import CryptoKit
 import Foundation
+import GigaAMKit
 
-enum ModelStore {
+actor ModelStore {
+    private let prepareModel: @Sendable (@escaping @Sendable (MeetingEvent) async -> Void) async throws -> URL
+    private var recognizer: GigaAMRecognizer?
+
+    init(prepare: @escaping @Sendable (@escaping @Sendable (MeetingEvent) async -> Void) async throws -> URL = {
+        try await ModelStore.prepare(update: $0)
+    }) {
+        prepareModel = prepare
+    }
+
+    // One transcription worker owns this store; unload only after its queue drains.
+    func load(update: @escaping @Sendable (MeetingEvent) async -> Void) async throws -> GigaAMRecognizer {
+        try Task.checkCancellation()
+        if let recognizer { return recognizer }
+        let directory = try await prepareModel(update)
+        try Task.checkCancellation()
+        await update(.stage("Загрузка модели…"))
+        let loaded = try GigaAMRecognizer(configuration: .init(modelDirectory: directory))
+        try Task.checkCancellation()
+        recognizer = loaded
+        return loaded
+    }
+
+    func unload() { recognizer = nil }
+
     // Pin the bundle and checksums together so upstream changes cannot mix model versions.
     private static let source = URL(string: "https://huggingface.co/kruatech/gigaam-v3-mlx/resolve/2478743c1c449a468ee163bc3030170d1a2e81fb/")!
     private static let files = [
