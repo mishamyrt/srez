@@ -1,8 +1,8 @@
 .DEFAULT_GOAL := build
 .PHONY: help build test app app-test clean publish test-release App/Info.plist
 
-VERSION := 1.0.0
-VERSION_BUNDLE := 1
+VERSION := 1.1.0
+VERSION_BUNDLE := 2
 export VERSION VERSION_BUNDLE
 
 App/Info.plist: App/Info.plist.tpl
