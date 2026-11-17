@@ -20,6 +20,10 @@ final class MeetingsViewModelTests: XCTestCase {
         for _ in 0..<100 where model?.jobs.count != 1 { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertEqual(model?.selectedIDs, [second.id])
         XCTAssertEqual(model?.jobs.first?.id, second.id)
+        await coordinator.remove(second.id)
+        for _ in 0..<100 where model?.jobs.isEmpty == false { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(model?.jobs.count, 0)
+        XCTAssertEqual(model?.selectedIDs, [])
         model = nil
         await Task.yield()
         XCTAssertNil(released)

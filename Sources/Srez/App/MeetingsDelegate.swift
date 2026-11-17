@@ -15,21 +15,12 @@ final class MeetingsDelegate: NSObject, NSApplicationDelegate {
         mainWindow = NSApp.windows.first { $0.title == "Srez" }
         jobsObservation = model.$jobs.map(\.isEmpty).removeDuplicates()
             .sink { [weak self] isEmpty in
-                if isEmpty {
-                    self?.mainWindow?.orderOut(nil)
-                } else {
+                if !isEmpty {
                     self?.mainWindow?.makeKeyAndOrderFront(nil)
                 }
             }
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
-        // Finder's open event arrives during launch; let it suppress the initial picker.
-        Task {
-            try? await Task.sleep(for: .milliseconds(350))
-            if await dependencies.coordinator.snapshot().jobs.isEmpty {
-                model.chooseFiles()
-            }
-        }
     }
 
     func applicationDidBecomeActive(_: Notification) {
@@ -46,13 +37,7 @@ final class MeetingsDelegate: NSObject, NSApplicationDelegate {
         _: NSApplication,
         hasVisibleWindows _: Bool
     ) -> Bool {
-        Task {
-            if await dependencies.coordinator.snapshot().jobs.isEmpty {
-                model.chooseFiles()
-            } else {
-                mainWindow?.makeKeyAndOrderFront(nil)
-            }
-        }
+        mainWindow?.makeKeyAndOrderFront(nil)
         return false
     }
 

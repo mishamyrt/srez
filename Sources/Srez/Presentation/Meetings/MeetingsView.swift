@@ -5,6 +5,7 @@ struct MeetingsView: View {
     @ObservedObject private var model: MeetingsViewModel
     @State private var isScrolled = false
     @State private var isOutputHovered = false
+    @State private var isDropTargeted = false
 
     init(model: MeetingsViewModel) {
         self.model = model
@@ -29,6 +30,11 @@ struct MeetingsView: View {
                 } action: { isScrolled = $0 }
             }
             .coordinateSpace(name: "meetingsScroll")
+            .overlay(alignment: .top) {
+                if model.jobs.isEmpty {
+                    emptyState
+                }
+            }
             .overlay(alignment: .top) {
                 if isScrolled {
                     Rectangle()
@@ -92,14 +98,28 @@ struct MeetingsView: View {
             .contentShape(Rectangle())
             .onHover { isOutputHovered = $0 }
         }
-        .background(Color(nsColor: .textBackgroundColor))
+        .background {
+            Color(nsColor: .textBackgroundColor)
+                .overlay(Color.accentColor.opacity(isDropTargeted ? 0.08 : 0))
+                .ignoresSafeArea()
+        }
         .frame(minWidth: 360, minHeight: 320)
+        .overlay {
+            RoundedRectangle(cornerRadius: 16)
+                .strokeBorder(
+                    Color.accentColor.opacity(isDropTargeted ? 1 : 0),
+                    lineWidth: 3
+                )
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+        }
         .dropDestination(for: URL.self) { urls, _ in
             let files = urls.filter(\.isFileURL)
             guard !files.isEmpty else { return false }
             model.enqueue(files)
             return true
-        }
+        } isTargeted: { isDropTargeted = $0 }
         .alert("Не удалось объединить расшифровки", isPresented: Binding(
             get: { model.summaryError != nil }, set: {
                 if !$0 {
@@ -111,7 +131,11 @@ struct MeetingsView: View {
         } message: {
             Text(model.summaryError ?? "")
         }
-        .toolbarBackground(Color(nsColor: .windowBackgroundColor), for: .windowToolbar)
+        .toolbarBackground(
+            isDropTargeted ? Color.accentColor
+                .opacity(0.08) : Color(nsColor: .windowBackgroundColor),
+            for: .windowToolbar
+        )
         .toolbarBackground(.visible, for: .windowToolbar)
         .toolbar {
             if #available(macOS 26, *) {
@@ -124,10 +148,25 @@ struct MeetingsView: View {
         }
     }
 
+    private var emptyState: some View {
+        VStack(spacing: 26) {
+            Image(systemName: "waveform")
+                .font(.system(size: 28))
+                .foregroundStyle(.tertiary)
+                .accessibilityHidden(true)
+            Text(isDropTargeted ? "Отпустите, чтобы добавить запись" : "Нет записей")
+                .font(.system(size: 15, weight: .semibold))
+                .multilineTextAlignment(.center)
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 32)
+        .frame(maxWidth: .infinity)
+    }
+
     private var windowActions: some ToolbarContent {
         ToolbarItem(placement: .primaryAction) {
             HStack(spacing: 6) {
-                Button("Открыть запись…", systemImage: "document") { model.chooseFiles() }
+                Button("Открыть запись…", systemImage: "folder") { model.chooseFiles() }
                     .disabled(model.pickerPresented)
                     .help("Открыть запись… (⌘O)")
                 SettingsLink {
